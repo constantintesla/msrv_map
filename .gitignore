@@ -1,0 +1,55 @@
+# Операционные системы
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Редакторы и IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Логи
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Временные файлы
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# Файлы окружения
+.env
+.env.local
+.env.*.local
+
+# Собранные файлы (если будет сборка)
+dist/
+build/
+*.min.js
+*.min.css
+
+# Зависимости (если будут добавлены)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Экспортированные файлы (опционально)
+exports/
+*.kmz
+*.kml
+
+# Файлы браузера
+*.orig

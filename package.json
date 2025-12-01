@@ -1,0 +1,15 @@
+{
+  "name": "kmz-generator",
+  "version": "1.0.0",
+  "description": "Веб-генератор KMZ файлов с сеткой и метками",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx http-server -p 8080",
+    "start": "npx http-server -p 8080"
+  },
+  "keywords": ["kmz", "kml", "map", "generator"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}
+

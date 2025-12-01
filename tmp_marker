@@ -1,0 +1,17 @@
+*** End Patch
+*** Begin Patch
+*** Update File: styles.css
+@@
+ .print-preview-map,
+ #print-preview-map .leaflet-right {
+     display: none !important;
+     visibility: hidden !important;
+ }
++
++/* Убираем нижние и правые контейнеры Leaflet на основной карте */
++#map .leaflet-bottom,
++#map .leaflet-right {
++    display: none !important;
++    visibility: hidden !important;
++}
+
