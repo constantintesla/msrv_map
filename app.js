@@ -242,31 +242,13 @@ class KMZGenerator {
             this.updatePrintPreview();
         });
         
-        // Печать
+        // Печать (экспорт в высоком разрешении)
         document.getElementById('print-btn').addEventListener('click', () => {
-            // Проверяем, что карта предпросмотра создана
             if (!this.printPreviewMap) {
                 alert('Дождитесь загрузки карты в предпросмотре');
                 return;
             }
-            
-            // Убеждаемся, что модальное окно видимо
-            const modal = document.getElementById('print-preview-modal');
-            if (modal.style.display === 'none') {
-                alert('Откройте предпросмотр печати сначала');
-                return;
-            }
-            
-            // Небольшая задержка для гарантии, что всё отрисовано
-            setTimeout(() => {
-                // Обновляем размер карты перед печатью
-                if (this.printPreviewMap) {
-                    this.printPreviewMap.invalidateSize();
-                }
-                
-                // Запускаем стандартную печать - CSS @media print скроет всё лишнее
-                window.print();
-            }, 100);
+            this.exportPrintImage();
         });
         
         // Экспорт KMZ
@@ -1360,6 +1342,7 @@ class KMZGenerator {
             id: Date.now(),
             latlng: latlng,
             type: markerType,
+            name: '',
             description: description,
             marker: marker
         };
@@ -1418,6 +1401,7 @@ class KMZGenerator {
             <div class="marker-item">
                 <div class="marker-item-info">
                     <div class="marker-item-type">${this.getMarkerTypeName(m.type)}</div>
+                    ${m.name ? `<div class="marker-item-name" style="font-size: 0.8rem; color: #666; margin-top: 0.15rem;">${m.name}</div>` : ''}
                     <div class="marker-item-desc">${m.description || 'Без описания'}</div>
                     <div class="marker-item-coords" style="font-size: 0.75rem; color: #999; margin-top: 0.2rem;">
                         ${m.latlng.lat.toFixed(6)}, ${m.latlng.lng.toFixed(6)}
@@ -1433,9 +1417,9 @@ class KMZGenerator {
     
     updateMarkerPopup(markerData) {
         const marker = markerData.marker;
-        const popupContent = markerData.description 
-            ? `<strong>${this.getMarkerTypeName(markerData.type)}</strong><br>${markerData.description}<br><small style="color: #999;">Ctrl+Click для редактирования</small>`
-            : `<strong>${this.getMarkerTypeName(markerData.type)}</strong><br><small style="color: #999;">Ctrl+Click для редактирования</small>`;
+        const markerName = markerData.name ? `<div>${markerData.name}</div>` : '';
+        const markerDescription = markerData.description ? `<div>${markerData.description}</div>` : '';
+        const popupContent = `<strong>${this.getMarkerTypeName(markerData.type)}</strong><br>${markerName}${markerDescription}<small style="color: #999;">Ctrl+Click для редактирования</small>`;
         marker.bindPopup(popupContent);
     }
     
@@ -1478,6 +1462,7 @@ class KMZGenerator {
                 markers: this.markers.map(m => ({
                     latlng: { lat: m.latlng.lat, lng: m.latlng.lng },
                     type: m.type,
+                    name: m.name || '',
                     description: m.description
                 })),
                 
@@ -1726,6 +1711,7 @@ class KMZGenerator {
                         const lastMarker = this.markers[this.markers.length - 1];
                         lastMarker.description = markerData.description || '';
                         lastMarker.type = markerData.type || 'default';
+                        lastMarker.name = markerData.name || '';
                         this.updateMarkerPopup(lastMarker);
                     }
                 });
@@ -1826,6 +1812,7 @@ class KMZGenerator {
         const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>';
         const kmlHeader = '<kml xmlns="http://www.opengis.net/kml/2.2">';
         const documentStart = '<Document>';
+        const exportGridLineWidth = this.getKMLLineWidth();
         
         let placemarks = [];
         
@@ -1833,7 +1820,7 @@ class KMZGenerator {
         this.markers.forEach(m => {
             const placemark = `
     <Placemark>
-        <name>${this.getMarkerTypeName(m.type)}</name>
+        <name>${m.name || this.getMarkerTypeName(m.type)}</name>
         <description><![CDATA[${m.description || ''}]]></description>
         <Point>
             <coordinates>${m.latlng.lng},${m.latlng.lat},0</coordinates>
@@ -1873,7 +1860,7 @@ class KMZGenerator {
         <Style>
             <LineStyle>
                 <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${this.gridWeight}</width>
+                <width>${exportGridLineWidth}</width>
             </LineStyle>
             <PolyStyle>
                 <color>00000000</color>
@@ -1929,7 +1916,7 @@ class KMZGenerator {
         <Style>
             <LineStyle>
                 <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${this.gridWeight}</width>
+                <width>${exportGridLineWidth}</width>
             </LineStyle>
         </Style>
     </Placemark>`;
@@ -1945,7 +1932,7 @@ class KMZGenerator {
         <Style>
             <LineStyle>
                 <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${this.gridWeight}</width>
+                <width>${exportGridLineWidth}</width>
             </LineStyle>
         </Style>
     </Placemark>`;
@@ -2279,6 +2266,7 @@ class KMZGenerator {
             
             // Парсим Placemarks
             const placemarks = xmlDoc.querySelectorAll('Placemark');
+            const styleTypeMap = this.buildKMLStyleTypeMap(xmlDoc);
             
             // Сначала собираем все квадраты сетки
             const gridSquaresMap = new Map();
@@ -2354,20 +2342,8 @@ class KMZGenerator {
                         }
                         
                         // Это настоящая метка
-                        // Определяем тип метки по названию или используем стандартный
-                        let markerType = 'default';
-                        const typeName = name.toLowerCase();
-                        if (typeName.includes('предупреждение') || typeName.includes('warning')) {
-                            markerType = 'warning';
-                        } else if (typeName.includes('опасность') || typeName.includes('danger')) {
-                            markerType = 'danger';
-                        } else if (typeName.includes('информация') || typeName.includes('info')) {
-                            markerType = 'info';
-                        } else if (typeName.includes('кпп') || typeName.includes('checkpoint')) {
-                            markerType = 'checkpoint';
-                        }
-                        
-                        this.addMarkerFromImport(pointLatLng, markerType, description);
+                        const markerType = this.resolveMarkerTypeFromPlacemark(placemark, name, styleTypeMap);
+                        this.addMarkerFromImport(pointLatLng, markerType, description, name);
                     }
                 }
             });
@@ -2383,7 +2359,125 @@ class KMZGenerator {
         }
     }
     
-    addMarkerFromImport(latlng, type, description) {
+    inferMarkerTypeByText(text) {
+        const value = (text || '').toLowerCase();
+        if (value.includes('предупреждение') || value.includes('warning') || value.includes('yellow') || value.includes('orange')) {
+            return 'warning';
+        }
+        if (value.includes('опасность') || value.includes('danger') || value.includes('red') || value.includes('outer')) {
+            return 'danger';
+        }
+        if (value.includes('информация') || value.includes('info') || value.includes('purple')) {
+            return 'info';
+        }
+        if (value.includes('кпп') || value.includes('checkpoint') || value.includes('green')) {
+            return 'checkpoint';
+        }
+        if (value.includes('стандарт') || value.includes('default') || value.includes('blue') || value.includes('inner')) {
+            return 'default';
+        }
+        return null;
+    }
+
+    inferMarkerTypeByColor(colorValue) {
+        const value = (colorValue || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+        const colorMap = {
+            // AARRGGBB (используется в текущем экспорте приложения)
+            'FF3388FF': 'default',
+            'FFFFC107': 'warning',
+            'FFDC3545': 'danger',
+            'FF17A2B8': 'info',
+            'FF28A745': 'checkpoint',
+            // AABBGGRR (стандарт KML)
+            'FFFF8833': 'default',
+            'FF07C1FF': 'warning',
+            'FF4535DC': 'danger',
+            'FFB8A217': 'info',
+            'FF45A728': 'checkpoint'
+        };
+        return colorMap[value] || null;
+    }
+
+    buildKMLStyleTypeMap(xmlDoc) {
+        const styleTypeMap = new Map();
+
+        xmlDoc.querySelectorAll('Style').forEach(styleNode => {
+            const styleId = styleNode.getAttribute('id');
+            if (!styleId) return;
+
+            let styleType = null;
+            const iconHref = styleNode.querySelector('IconStyle Icon href')?.textContent || '';
+            if (iconHref) {
+                styleType = this.inferMarkerTypeByText(iconHref);
+            }
+
+            if (!styleType) {
+                const iconColor = styleNode.querySelector('IconStyle color')?.textContent || '';
+                styleType = this.inferMarkerTypeByColor(iconColor);
+            }
+
+            if (!styleType) {
+                styleType = this.inferMarkerTypeByText(styleId);
+            }
+
+            if (styleType) {
+                styleTypeMap.set(styleId, styleType);
+                styleTypeMap.set(`#${styleId}`, styleType);
+            }
+        });
+
+        xmlDoc.querySelectorAll('StyleMap').forEach(styleMapNode => {
+            const styleMapId = styleMapNode.getAttribute('id');
+            if (!styleMapId) return;
+
+            const pairs = styleMapNode.querySelectorAll('Pair');
+            for (const pair of pairs) {
+                const key = (pair.querySelector('key')?.textContent || '').trim();
+                const styleUrl = (pair.querySelector('styleUrl')?.textContent || '').trim();
+                if (key !== 'normal' || !styleUrl) continue;
+
+                const styleType = styleTypeMap.get(styleUrl) || styleTypeMap.get(styleUrl.replace(/^#/, ''));
+                if (styleType) {
+                    styleTypeMap.set(styleMapId, styleType);
+                    styleTypeMap.set(`#${styleMapId}`, styleType);
+                    break;
+                }
+            }
+        });
+
+        return styleTypeMap;
+    }
+
+    resolveMarkerTypeFromPlacemark(placemark, markerName, styleTypeMap) {
+        const styleUrl = (placemark.querySelector('styleUrl')?.textContent || '').trim();
+        if (styleUrl) {
+            const styleByUrl = styleTypeMap.get(styleUrl) || styleTypeMap.get(styleUrl.replace(/^#/, ''));
+            if (styleByUrl) {
+                return styleByUrl;
+            }
+        }
+
+        const inlineIconHref = placemark.querySelector('Style IconStyle Icon href')?.textContent || '';
+        if (inlineIconHref) {
+            const typeByInlineHref = this.inferMarkerTypeByText(inlineIconHref);
+            if (typeByInlineHref) {
+                return typeByInlineHref;
+            }
+        }
+
+        const inlineColor = placemark.querySelector('Style IconStyle color')?.textContent || '';
+        const inlineColorType = this.inferMarkerTypeByColor(inlineColor);
+        if (inlineColorType) {
+            return inlineColorType;
+        }
+
+        return this.inferMarkerTypeByText(markerName) || 'default';
+    }
+
+    addMarkerFromImport(latlng, type, description, name = '') {
+        const markerName = (name || '').trim();
+        const markerDescription = (description || '').trim();
+
         const iconColors = {
             'default': '#3388ff',
             'warning': '#ffc107',
@@ -2416,7 +2510,8 @@ class KMZGenerator {
             id: Date.now() + Math.random(),
             latlng: latlng,
             type: type,
-            description: description || '',
+            name: markerName,
+            description: markerDescription,
             marker: marker
         };
         
@@ -2437,10 +2532,6 @@ class KMZGenerator {
         
         this.markers.push(markerData);
         this.updateMarkerPopup(markerData);
-        
-        if (description) {
-            marker.bindPopup(`<strong>${this.getMarkerTypeName(type)}</strong><br>${description}`);
-        }
     }
     
     addGridSquareFromImport(bounds, name) {
@@ -2508,6 +2599,16 @@ class KMZGenerator {
                ('0' + b.toString(16)).slice(-2).toUpperCase() + 
                ('0' + g.toString(16)).slice(-2).toUpperCase() + 
                ('0' + r.toString(16)).slice(-2).toUpperCase();
+    }
+
+    getKMLLineWidth() {
+        // Android и iOS KML viewers рендерят толщину по-разному.
+        // Нормализуем и ограничиваем значение, чтобы избежать "очень жирных" линий на Android.
+        const sourceWeight = Number(this.gridWeight);
+        const safeWeight = Number.isFinite(sourceWeight) ? sourceWeight : 2;
+        const normalized = safeWeight * 0.6;
+        const clamped = Math.max(1, Math.min(3, normalized));
+        return clamped.toFixed(1);
     }
     
     clearAll() {
@@ -2884,6 +2985,123 @@ class KMZGenerator {
                 container.innerHTML = '<p style="padding: 2rem; color: #dc3545; text-align: center;">Ошибка при создании предпросмотра: ' + error.message + '</p>';
             }
         }, 300);
+    }
+    
+    // Экспорт карты для печати в высоком разрешении
+    async exportPrintImage() {
+        if (!this.printPreviewMap) {
+            alert('Карта предпросмотра не готова');
+            return;
+        }
+        
+        const paperSize = document.getElementById('paper-size').value;
+        const orientation = document.getElementById('orientation').value;
+        
+        // Определяем размеры в пикселях для высокого разрешения (300 DPI)
+        // A4: 210x297mm или 2480x3508px при 300 DPI
+        // A3: 297x420mm или 3508x4961px при 300 DPI
+        let widthPx, heightPx;
+        if (paperSize === 'A4') {
+            widthPx = orientation === 'portrait' ? 2480 : 3508;
+            heightPx = orientation === 'portrait' ? 3508 : 2480;
+        } else { // A3
+            widthPx = orientation === 'portrait' ? 3508 : 4961;
+            heightPx = orientation === 'portrait' ? 4961 : 3508;
+        }
+        
+        try {
+            // Показываем индикатор загрузки
+            const printBtn = document.getElementById('print-btn');
+            const originalText = printBtn.textContent;
+            printBtn.textContent = 'Создание изображения...';
+            printBtn.disabled = true;
+            
+            // Ждем, пока все тайлы загрузятся
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Обновляем размер карты
+            this.printPreviewMap.invalidateSize();
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Получаем контейнер карты
+            const mapContainer = this.printPreviewMap.getContainer();
+            
+            // Создаем изображение с высоким разрешением
+            // Используем scale=3 для увеличения разрешения
+            const canvas = await html2canvas(mapContainer, {
+                scale: 3, // Высокое разрешение
+                useCORS: true,
+                logging: false,
+                width: mapContainer.offsetWidth,
+                height: mapContainer.offsetHeight,
+                backgroundColor: '#ffffff',
+                windowWidth: mapContainer.scrollWidth,
+                windowHeight: mapContainer.scrollHeight
+            });
+            
+            // Создаем новый canvas с нужным размером для печати
+            const printCanvas = document.createElement('canvas');
+            printCanvas.width = widthPx;
+            printCanvas.height = heightPx;
+            const ctx = printCanvas.getContext('2d');
+            
+            // Заливаем белым фоном
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, widthPx, heightPx);
+            
+            // Вычисляем масштаб для вписывания карты в размер листа
+            const scaleX = widthPx / canvas.width;
+            const scaleY = heightPx / canvas.height;
+            const scale = Math.min(scaleX, scaleY);
+            
+            // Центрируем изображение
+            const scaledWidth = canvas.width * scale;
+            const scaledHeight = canvas.height * scale;
+            const x = (widthPx - scaledWidth) / 2;
+            const y = (heightPx - scaledHeight) / 2;
+            
+            // Рисуем карту на canvas для печати
+            ctx.drawImage(canvas, x, y, scaledWidth, scaledHeight);
+            
+            // Создаем PDF
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({
+                orientation: orientation === 'landscape' ? 'landscape' : 'portrait',
+                unit: 'mm',
+                format: paperSize.toLowerCase()
+            });
+            
+            // Добавляем изображение в PDF
+            const imgData = printCanvas.toDataURL('image/png', 1.0);
+            pdf.addImage(imgData, 'PNG', 0, 0, 
+                orientation === 'landscape' ? 
+                    (paperSize === 'A4' ? 297 : 420) : 
+                    (paperSize === 'A4' ? 210 : 297),
+                orientation === 'landscape' ? 
+                    (paperSize === 'A4' ? 210 : 297) : 
+                    (paperSize === 'A4' ? 297 : 420)
+            );
+            
+            // Сохраняем PDF
+            const fileName = `map_print_${paperSize}_${orientation}_${new Date().getTime()}.pdf`;
+            pdf.save(fileName);
+            
+            // Восстанавливаем состояние кнопки
+            printBtn.textContent = originalText;
+            printBtn.disabled = false;
+            
+            alert('PDF файл успешно создан!');
+        } catch (error) {
+            console.error('Ошибка при создании изображения:', error);
+            alert('Ошибка при создании PDF: ' + error.message);
+            
+            // Восстанавливаем состояние кнопки в случае ошибки
+            const printBtn = document.getElementById('print-btn');
+            if (printBtn) {
+                printBtn.textContent = 'Печать';
+                printBtn.disabled = false;
+            }
+        }
     }
 }
 
