@@ -62,6 +62,23 @@
                     </div>
                     
                     <div class="control-group">
+                        <h3>Сдвиг сетки</h3>
+                        <label for="grid-shift-step">Шаг сдвига (метры):</label>
+                        <input type="number" id="grid-shift-step" value="10" min="1" max="10000" step="1">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 8px;">
+                            <div></div>
+                            <button id="shift-grid-up" class="btn btn-secondary" style="margin: 0;">Вверх</button>
+                            <div></div>
+                            <button id="shift-grid-left" class="btn btn-secondary" style="margin: 0;">Влево</button>
+                            <button id="shift-grid-center" class="btn btn-secondary" style="margin: 0;">Обновить</button>
+                            <button id="shift-grid-right" class="btn btn-secondary" style="margin: 0;">Вправо</button>
+                            <div></div>
+                            <button id="shift-grid-down" class="btn btn-secondary" style="margin: 0;">Вниз</button>
+                            <div></div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
                         <div class="info-text">
                             <small style="color: #666;">Улитка отображается только в квадрате A2 как справочная информация</small>
                         </div>
@@ -90,6 +107,26 @@
                     </div>
                     
                     <div class="control-group">
+                        <h3>Подписи и шрифт</h3>
+                        <label>
+                            <input type="checkbox" id="show-point-labels" checked> Показывать подписи точек
+                        </label>
+                        <label for="label-font-family">Шрифт:</label>
+                        <select id="label-font-family">
+                            <option value="Arial, sans-serif">Arial</option>
+                            <option value="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif">Segoe UI</option>
+                            <option value="'Roboto', sans-serif">Roboto</option>
+                            <option value="'Times New Roman', serif">Times New Roman</option>
+                        </select>
+                        <label for="square-font-size">Шрифт квадратов (px):</label>
+                        <input type="number" id="square-font-size" value="11" min="8" max="48" step="1">
+                        <label for="edge-font-size">Шрифт краевых меток (px):</label>
+                        <input type="number" id="edge-font-size" value="12" min="8" max="48" step="1">
+                        <label for="point-font-size">Шрифт подписей точек (px):</label>
+                        <input type="number" id="point-font-size" value="12" min="8" max="48" step="1">
+                    </div>
+                    
+                    <div class="control-group">
                         <h3>Добавить метку</h3>
                         <label for="marker-type">Тип метки:</label>
                         <select id="marker-type">
@@ -102,6 +139,8 @@
                         
                         <label for="marker-description">Описание:</label>
                         <textarea id="marker-description" rows="3" placeholder="Введите описание метки"></textarea>
+                        <label for="marker-name">Подпись точки:</label>
+                        <input type="text" id="marker-name" placeholder="Например: Точка 1">
                         
                         <button id="add-marker-btn" class="btn btn-primary">Режим добавления меток</button>
                     </div>
@@ -130,6 +169,7 @@
                         <div style="margin-top: 10px;">
                             <button id="export-kmz" class="btn btn-success">Экспортировать KMZ</button>
                             <button id="export-kml" class="btn btn-success" style="margin-top: 5px;">Экспортировать KML</button>
+                            <button id="export-hires-png" class="btn btn-success" style="margin-top: 5px;">Экспортировать PNG (сетка и точки)</button>
                         </div>
                         <div style="margin-top: 10px;">
                             <label for="import-kmz" class="btn btn-info" style="display: inline-block; cursor: pointer; margin: 0;">
@@ -170,12 +210,19 @@
                     <label for="preview-zoom">Масштаб:</label>
                     <input type="range" id="preview-zoom" min="1" max="19" step="0.1" value="13" style="flex: 1;">
                     <span id="preview-zoom-value" style="min-width: 40px; text-align: right; font-size: 0.85rem; color: #555;">13</span>
+                    <label for="export-zone-mode">Зона экспорта:</label>
+                    <select id="export-zone-mode">
+                        <option value="grid">По сетке</option>
+                        <option value="selected-zone">Выбранная зона</option>
+                        <option value="current-view">Текущий экран</option>
+                    </select>
                 </div>
                 <div id="print-preview-container" class="print-preview-container">
                     <!-- Сюда будет вставлен предпросмотр -->
                 </div>
                 <div class="print-actions">
                     <button id="print-btn" class="btn btn-primary">Печать</button>
+                    <button id="export-png-btn" class="btn btn-success">Экспорт PNG (сетка и точки)</button>
                     <button id="cancel-print-btn" class="btn btn-secondary">Отмена</button>
                 </div>
             </div>
@@ -197,7 +244,7 @@
     <!-- jsPDF for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
-    <script src="app.js?v=54"></script>
+    <script src="app.js?v=56"></script>
 </body>
 </html>
 

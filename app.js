@@ -19,11 +19,19 @@ class KMZGenerator {
         this.zoneRectangle = null; // Прямоугольник выбранной зоны
         this.zoneSelectionMode = false; // Режим выбора зоны
         this.printPreviewMap = null; // Карта для предпросмотра печати
+        this.previewReadyPromise = null;
+        this.resolvePreviewReady = null;
         this.gridBounds = null; // Границы сетки для позиционирования краевых меток
         this.showEdgeLeft = true;
         this.showEdgeRight = false;
         this.showEdgeTop = true;
         this.showEdgeBottom = true;
+        this.showPointLabels = true;
+        this.labelFontFamily = 'Arial, sans-serif';
+        this.squareLabelFontSize = 11;
+        this.edgeLabelFontSize = 12;
+        this.pointLabelFontSize = 12;
+        this.gridShiftStepMeters = 10;
         this.currentMapType = 'satellite'; // Тип текущей карты
         
         this.init();
@@ -160,6 +168,19 @@ class KMZGenerator {
             this.generateGrid();
         });
         
+        // Шаг сдвига сетки
+        document.getElementById('grid-shift-step').addEventListener('change', (e) => {
+            this.gridShiftStepMeters = Math.max(1, parseInt(e.target.value, 10) || 10);
+            e.target.value = this.gridShiftStepMeters;
+        });
+        
+        // Сдвиг сетки
+        document.getElementById('shift-grid-up').addEventListener('click', () => this.shiftGrid('up'));
+        document.getElementById('shift-grid-down').addEventListener('click', () => this.shiftGrid('down'));
+        document.getElementById('shift-grid-left').addEventListener('click', () => this.shiftGrid('left'));
+        document.getElementById('shift-grid-right').addEventListener('click', () => this.shiftGrid('right'));
+        document.getElementById('shift-grid-center').addEventListener('click', () => this.rebuildGridVisuals());
+        
         // Настройки сетки
         document.getElementById('grid-color').addEventListener('change', (e) => {
             this.gridColor = e.target.value;
@@ -219,6 +240,31 @@ class KMZGenerator {
             }
         });
         
+        document.getElementById('show-point-labels').addEventListener('change', (e) => {
+            this.showPointLabels = e.target.checked;
+            this.updateMarkerLabels();
+        });
+        
+        document.getElementById('label-font-family').addEventListener('change', (e) => {
+            this.labelFontFamily = e.target.value || 'Arial, sans-serif';
+            this.refreshLabelStyles();
+        });
+        
+        document.getElementById('square-font-size').addEventListener('change', (e) => {
+            this.squareLabelFontSize = parseInt(e.target.value, 10) || 11;
+            this.refreshLabelStyles();
+        });
+        
+        document.getElementById('edge-font-size').addEventListener('change', (e) => {
+            this.edgeLabelFontSize = parseInt(e.target.value, 10) || 12;
+            this.refreshLabelStyles();
+        });
+        
+        document.getElementById('point-font-size').addEventListener('change', (e) => {
+            this.pointLabelFontSize = parseInt(e.target.value, 10) || 12;
+            this.updateMarkerLabels();
+        });
+        
         // Предпросмотр печати
         document.getElementById('print-preview').addEventListener('click', () => {
             this.showPrintPreview();
@@ -242,13 +288,25 @@ class KMZGenerator {
             this.updatePrintPreview();
         });
         
+        document.getElementById('export-zone-mode').addEventListener('change', () => {
+            this.updatePrintPreview();
+        });
+        
         // Печать (экспорт в высоком разрешении)
         document.getElementById('print-btn').addEventListener('click', () => {
             if (!this.printPreviewMap) {
                 alert('Дождитесь загрузки карты в предпросмотре');
                 return;
             }
-            this.exportPrintImage();
+            this.exportPrintImage('pdf');
+        });
+        
+        document.getElementById('export-png-btn').addEventListener('click', () => {
+            if (!this.printPreviewMap) {
+                alert('Дождитесь загрузки карты в предпросмотре');
+                return;
+            }
+            this.exportPrintImage('png');
         });
         
         // Экспорт KMZ
@@ -259,6 +317,24 @@ class KMZGenerator {
         // Экспорт KML
         document.getElementById('export-kml').addEventListener('click', () => {
             this.exportKML();
+        });
+        
+        document.getElementById('export-hires-png').addEventListener('click', async () => {
+            if (!this.gridBounds || this.gridSquares.length === 0) {
+                alert('Сначала создайте сетку, чтобы экспортировать PNG.');
+                return;
+            }
+            this.showPrintPreview();
+            const isReady = await this.waitForPreviewReady(6000);
+            if (!isReady) {
+                alert('Предпросмотр не успел загрузиться. Попробуйте еще раз.');
+                return;
+            }
+            if (!this.printPreviewMap) {
+                alert('Не удалось подготовить карту предпросмотра.');
+                return;
+            }
+            this.exportPrintImage('png');
         });
         
         // Импорт KMZ/KML
@@ -668,13 +744,14 @@ class KMZGenerator {
                         html: `<div style="
                             background: transparent;
                             padding: 0;
-                            font-size: 12px;
+                            font-size: ${this.edgeLabelFontSize}px;
                             font-weight: bold;
                             color: white;
                             pointer-events: none;
                             user-select: none;
                             text-align: center;
                             white-space: nowrap;
+                            font-family: ${this.labelFontFamily};
                         ">${letter}</div>`,
                         iconSize: [20, 16],
                         iconAnchor: [20, 8]
@@ -704,13 +781,14 @@ class KMZGenerator {
                         html: `<div style="
                             background: transparent;
                             padding: 0;
-                            font-size: 12px;
+                            font-size: ${this.edgeLabelFontSize}px;
                             font-weight: bold;
                             color: white;
                             pointer-events: none;
                             user-select: none;
                             text-align: center;
                             white-space: nowrap;
+                            font-family: ${this.labelFontFamily};
                         ">${letter}</div>`,
                         iconSize: [20, 16],
                         iconAnchor: [0, 8]
@@ -740,13 +818,14 @@ class KMZGenerator {
                         html: `<div style="
                             background: transparent;
                             padding: 0;
-                            font-size: 12px;
+                            font-size: ${this.edgeLabelFontSize}px;
                             font-weight: bold;
                             color: white;
                             pointer-events: none;
                             user-select: none;
                             text-align: center;
                             white-space: nowrap;
+                            font-family: ${this.labelFontFamily};
                         ">${number}</div>`,
                         iconSize: [20, 16],
                         iconAnchor: [10, 16]
@@ -776,13 +855,14 @@ class KMZGenerator {
                         html: `<div style="
                             background: transparent;
                             padding: 0;
-                            font-size: 12px;
+                            font-size: ${this.edgeLabelFontSize}px;
                             font-weight: bold;
                             color: white;
                             pointer-events: none;
                             user-select: none;
                             text-align: center;
                             white-space: nowrap;
+                            font-family: ${this.labelFontFamily};
                         ">${number}</div>`,
                         iconSize: [20, 16],
                         iconAnchor: [10, 0]
@@ -898,14 +978,14 @@ class KMZGenerator {
                         background: transparent;
                         border: none;
                         padding: 0;
-                        font-size: 16px;
+                        font-size: ${this.squareLabelFontSize + 5}px;
                         font-weight: bold;
                         color: white;
                         pointer-events: none;
                         user-select: none;
                         text-align: center;
                         line-height: 1;
-                        font-family: Arial, sans-serif;
+                        font-family: ${this.labelFontFamily};
                     ">${part.number}</div>`,
                     iconSize: [24, 24],
                     iconAnchor: [12, 12]
@@ -948,13 +1028,14 @@ class KMZGenerator {
                 html: `<div style="
                     background: transparent;
                     padding: 0;
-                    font-size: 11px;
+                    font-size: ${this.squareLabelFontSize}px;
                     font-weight: bold;
                     color: white;
                     pointer-events: none;
                     user-select: none;
                     white-space: nowrap;
                     text-align: ${isA1 ? 'center' : 'right'};
+                    font-family: ${this.labelFontFamily};
                 ">${labelText}</div>`,
                 iconSize: isA1 ? [80, 18] : [60, 16],
                 iconAnchor: isA1 ? [40, 9] : [60, 16] // A1 - центр, остальные - правый нижний угол
@@ -1060,9 +1141,9 @@ class KMZGenerator {
         // Базовый размер шрифта при масштабе 13, масштабируется пропорционально
         const baseZoom = 13;
         // Уменьшены базовые размеры для лучшего отображения в предпросмотре
-        const baseFontSize = 8; // для названий квадратов
-        const baseEdgeFontSize = 9; // для краевых меток
-        const baseSnailFontSize = 10; // для цифр в A2
+        const baseFontSize = this.squareLabelFontSize;
+        const baseEdgeFontSize = this.edgeLabelFontSize;
+        const baseSnailFontSize = this.squareLabelFontSize + 5;
         
         // Более плавное масштабирование: используем линейное масштабирование вместо экспоненциального
         // Каждый уровень зума увеличивает шрифт на 10% вместо удвоения
@@ -1081,18 +1162,21 @@ class KMZGenerator {
             const squareLabels = mapContainer.querySelectorAll('.square-label-div div');
             squareLabels.forEach(label => {
                 label.style.fontSize = fontSize + 'px';
+                label.style.fontFamily = this.labelFontFamily;
             });
             
             // Обновляем краевые метки
             const edgeLabels = mapContainer.querySelectorAll('.edge-label-left div, .edge-label-right div, .edge-label-top div, .edge-label-bottom div');
             edgeLabels.forEach(label => {
                 label.style.fontSize = edgeFontSize + 'px';
+                label.style.fontFamily = this.labelFontFamily;
             });
             
             // Обновляем цифры в A2
             const snailLabels = mapContainer.querySelectorAll('.snail-label-div div');
             snailLabels.forEach(label => {
                 label.style.fontSize = snailFontSize + 'px';
+                label.style.fontFamily = this.labelFontFamily;
             });
         }
     }
@@ -1124,13 +1208,14 @@ class KMZGenerator {
                     html: `<div style="
                         background: transparent;
                         padding: 0;
-                        font-size: 12px;
+                        font-size: ${this.edgeLabelFontSize}px;
                         font-weight: bold;
                         color: white;
                         pointer-events: none;
                         user-select: none;
                         text-align: center;
                         white-space: nowrap;
+                        font-family: ${this.labelFontFamily};
                     ">${letter}</div>`,
                     iconSize: [20, 16],
                     iconAnchor: [20, 8]
@@ -1157,13 +1242,14 @@ class KMZGenerator {
                     html: `<div style="
                         background: transparent;
                         padding: 0;
-                        font-size: 12px;
+                        font-size: ${this.edgeLabelFontSize}px;
                         font-weight: bold;
                         color: white;
                         pointer-events: none;
                         user-select: none;
                         text-align: center;
                         white-space: nowrap;
+                        font-family: ${this.labelFontFamily};
                     ">${letter}</div>`,
                     iconSize: [20, 16],
                     iconAnchor: [0, 8]
@@ -1190,13 +1276,14 @@ class KMZGenerator {
                     html: `<div style="
                         background: transparent;
                         padding: 0;
-                        font-size: 12px;
+                        font-size: ${this.edgeLabelFontSize}px;
                         font-weight: bold;
                         color: white;
                         pointer-events: none;
                         user-select: none;
                         text-align: center;
                         white-space: nowrap;
+                        font-family: ${this.labelFontFamily};
                     ">${number}</div>`,
                     iconSize: [20, 16],
                     iconAnchor: [10, 16]
@@ -1223,13 +1310,14 @@ class KMZGenerator {
                     html: `<div style="
                         background: transparent;
                         padding: 0;
-                        font-size: 12px;
+                        font-size: ${this.edgeLabelFontSize}px;
                         font-weight: bold;
                         color: white;
                         pointer-events: none;
                         user-select: none;
                         text-align: center;
                         white-space: nowrap;
+                        font-family: ${this.labelFontFamily};
                     ">${number}</div>`,
                     iconSize: [20, 16],
                     iconAnchor: [10, 0]
@@ -1316,6 +1404,8 @@ class KMZGenerator {
     addMarker(latlng) {
         const markerType = document.getElementById('marker-type').value;
         const description = document.getElementById('marker-description').value || '';
+        const markerNameInput = document.getElementById('marker-name');
+        const markerName = markerNameInput ? markerNameInput.value.trim() : '';
         
         const iconColors = {
             'default': '#3388ff',
@@ -1342,7 +1432,7 @@ class KMZGenerator {
             id: Date.now(),
             latlng: latlng,
             type: markerType,
-            name: '',
+            name: markerName,
             description: description,
             marker: marker
         };
@@ -1368,6 +1458,35 @@ class KMZGenerator {
         
         // Добавляем popup с описанием
         this.updateMarkerPopup(markerData);
+        this.updateMarkerLabel(markerData);
+        
+        if (markerNameInput) {
+            markerNameInput.value = '';
+        }
+    }
+    
+    updateMarkerLabel(markerData) {
+        if (!markerData || !markerData.marker) return;
+        
+        markerData.marker.unbindTooltip();
+        
+        if (!this.showPointLabels || !markerData.name) return;
+        
+        const safeName = this.escapeHtml(markerData.name);
+        markerData.marker.bindTooltip(
+            `<span style="font-size:${this.pointLabelFontSize}px;font-weight:600;font-family:${this.labelFontFamily};color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;">${safeName}</span>`,
+            {
+                permanent: true,
+                direction: 'top',
+                offset: [0, -12],
+                className: 'marker-name-tooltip',
+                interactive: false
+            }
+        );
+    }
+    
+    updateMarkerLabels() {
+        this.markers.forEach(markerData => this.updateMarkerLabel(markerData));
     }
     
     getMarkerTypeName(type) {
@@ -1432,7 +1551,12 @@ class KMZGenerator {
         
         if (newDescription !== null) { // null означает, что пользователь нажал "Отмена"
             markerData.description = newDescription;
+            const newName = prompt('Введите подпись точки:', markerData.name || '');
+            if (newName !== null) {
+                markerData.name = newName.trim();
+            }
             this.updateMarkerPopup(markerData);
+            this.updateMarkerLabel(markerData);
             this.updateMarkersList();
         }
     }
@@ -1503,6 +1627,12 @@ class KMZGenerator {
                 showEdgeRight: this.showEdgeRight,
                 showEdgeTop: this.showEdgeTop,
                 showEdgeBottom: this.showEdgeBottom,
+                showPointLabels: this.showPointLabels,
+                labelFontFamily: this.labelFontFamily,
+                squareLabelFontSize: this.squareLabelFontSize,
+                edgeLabelFontSize: this.edgeLabelFontSize,
+                pointLabelFontSize: this.pointLabelFontSize,
+                gridShiftStepMeters: this.gridShiftStepMeters,
                 
                 // Настройки карты
                 mapType: this.currentMapType,
@@ -1585,6 +1715,20 @@ class KMZGenerator {
             
             const data = project.data;
             
+            // Восстанавливаем настройки подписей и шрифтов
+            this.showPointLabels = data.showPointLabels !== undefined ? data.showPointLabels : true;
+            this.labelFontFamily = data.labelFontFamily || 'Arial, sans-serif';
+            this.squareLabelFontSize = data.squareLabelFontSize || 11;
+            this.edgeLabelFontSize = data.edgeLabelFontSize || 12;
+            this.pointLabelFontSize = data.pointLabelFontSize || 12;
+            this.gridShiftStepMeters = data.gridShiftStepMeters || 10;
+            document.getElementById('show-point-labels').checked = this.showPointLabels;
+            document.getElementById('label-font-family').value = this.labelFontFamily;
+            document.getElementById('square-font-size').value = this.squareLabelFontSize;
+            document.getElementById('edge-font-size').value = this.edgeLabelFontSize;
+            document.getElementById('point-font-size').value = this.pointLabelFontSize;
+            document.getElementById('grid-shift-step').value = this.gridShiftStepMeters;
+            
             // Восстанавливаем настройки карты
             if (data.mapType && data.mapType !== this.currentMapType) {
                 this.loadMapType(data.mapType);
@@ -1625,6 +1769,11 @@ class KMZGenerator {
                 this.showEdgeRight = data.showEdgeRight !== undefined ? data.showEdgeRight : false;
                 this.showEdgeTop = data.showEdgeTop !== undefined ? data.showEdgeTop : true;
                 this.showEdgeBottom = data.showEdgeBottom !== undefined ? data.showEdgeBottom : true;
+                this.showPointLabels = data.showPointLabels !== undefined ? data.showPointLabels : true;
+                this.labelFontFamily = data.labelFontFamily || 'Arial, sans-serif';
+                this.squareLabelFontSize = data.squareLabelFontSize || 11;
+                this.edgeLabelFontSize = data.edgeLabelFontSize || 12;
+                this.pointLabelFontSize = data.pointLabelFontSize || 12;
                 
                 // Обновляем UI
                 document.getElementById('grid-size').value = this.gridSize;
@@ -1635,6 +1784,11 @@ class KMZGenerator {
                 document.getElementById('show-edge-right').checked = this.showEdgeRight;
                 document.getElementById('show-edge-top').checked = this.showEdgeTop;
                 document.getElementById('show-edge-bottom').checked = this.showEdgeBottom;
+                document.getElementById('show-point-labels').checked = this.showPointLabels;
+                document.getElementById('label-font-family').value = this.labelFontFamily;
+                document.getElementById('square-font-size').value = this.squareLabelFontSize;
+                document.getElementById('edge-font-size').value = this.edgeLabelFontSize;
+                document.getElementById('point-font-size').value = this.pointLabelFontSize;
                 
                 // Восстанавливаем границы сетки
                 if (data.gridBounds) {
@@ -1719,7 +1873,10 @@ class KMZGenerator {
                 // Очищаем временные поля
                 document.getElementById('marker-type').value = 'default';
                 document.getElementById('marker-description').value = '';
+                document.getElementById('marker-name').value = '';
             }
+            
+            this.updateMarkerLabels();
             
             alert('Проект "' + project.name + '" успешно загружен!');
         } catch (error) {
@@ -1808,48 +1965,186 @@ class KMZGenerator {
         }
     }
     
-    generateKML() {
-        const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>';
-        const kmlHeader = '<kml xmlns="http://www.opengis.net/kml/2.2">';
-        const documentStart = '<Document>';
-        const exportGridLineWidth = this.getKMLLineWidth();
+    escapeKMLText(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+    }
+    
+    getKMLMarkerIconHref(type) {
+        const iconMap = {
+            default: 'http://maps.google.com/mapfiles/kml/paddle/blu-circle.png',
+            warning: 'http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png',
+            danger: 'http://maps.google.com/mapfiles/kml/paddle/red-circle.png',
+            info: 'http://maps.google.com/mapfiles/kml/paddle/purple-circle.png',
+            checkpoint: 'http://maps.google.com/mapfiles/kml/paddle/grn-circle.png'
+        };
+        return iconMap[type] || iconMap.default;
+    }
+    
+    getKMLStyles() {
+        const gridColor = this.getKMLColorFromHex(this.gridColor);
+        const gridWidth = this.getKMLLineWidth();
         
-        let placemarks = [];
-        
-        // Добавляем метки
-        this.markers.forEach(m => {
-            const placemark = `
+        return `
+    <Style id="gridSquareStyle">
+        <LineStyle>
+            <color>${gridColor}</color>
+            <width>${gridWidth}</width>
+        </LineStyle>
+        <PolyStyle>
+            <color>00000000</color>
+            <fill>0</fill>
+            <outline>1</outline>
+        </PolyStyle>
+    </Style>
+    <Style id="gridGuideLineStyle">
+        <LineStyle>
+            <color>${gridColor}</color>
+            <width>${gridWidth}</width>
+        </LineStyle>
+    </Style>
+    <Style id="squareLabelStyle">
+        <IconStyle>
+            <scale>0.35</scale>
+            <Icon>
+                <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.75</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="edgeLabelStyle">
+        <IconStyle>
+            <scale>0.3</scale>
+            <Icon>
+                <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.7</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="marker-default-style">
+        <IconStyle>
+            <scale>1.0</scale>
+            <Icon>
+                <href>${this.getKMLMarkerIconHref('default')}</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.8</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="marker-warning-style">
+        <IconStyle>
+            <scale>1.0</scale>
+            <Icon>
+                <href>${this.getKMLMarkerIconHref('warning')}</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.8</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="marker-danger-style">
+        <IconStyle>
+            <scale>1.0</scale>
+            <Icon>
+                <href>${this.getKMLMarkerIconHref('danger')}</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.8</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="marker-info-style">
+        <IconStyle>
+            <scale>1.0</scale>
+            <Icon>
+                <href>${this.getKMLMarkerIconHref('info')}</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.8</scale>
+        </LabelStyle>
+    </Style>
+    <Style id="marker-checkpoint-style">
+        <IconStyle>
+            <scale>1.0</scale>
+            <Icon>
+                <href>${this.getKMLMarkerIconHref('checkpoint')}</href>
+            </Icon>
+        </IconStyle>
+        <LabelStyle>
+            <color>FFFFFFFF</color>
+            <scale>0.8</scale>
+        </LabelStyle>
+    </Style>`;
+    }
+    
+    getKMLMarkerStyleId(type) {
+        return `#marker-${type || 'default'}-style`;
+    }
+    
+    formatKMLCoordinate(latlng) {
+        return `${latlng.lng},${latlng.lat},0`;
+    }
+    
+    formatKMLCoordinateList(latlngs) {
+        return latlngs.map(latlng => this.formatKMLCoordinate(latlng)).join(' ');
+    }
+    
+    createKMLPointPlacemark({ name = '', description = '', styleUrl = '', latlng }) {
+        const escapedName = this.escapeKMLText(name);
+        const escapedDescription = this.escapeKMLText(description);
+        const styleUrlLine = styleUrl ? `\n        <styleUrl>${styleUrl}</styleUrl>` : '';
+        const descriptionLine = escapedDescription ? `\n        <description>${escapedDescription}</description>` : '';
+        return `
     <Placemark>
-        <name>${m.name || this.getMarkerTypeName(m.type)}</name>
-        <description><![CDATA[${m.description || ''}]]></description>
+        <name>${escapedName}</name>${descriptionLine}${styleUrlLine}
         <Point>
-            <coordinates>${m.latlng.lng},${m.latlng.lat},0</coordinates>
+            <coordinates>${this.formatKMLCoordinate(latlng)}</coordinates>
         </Point>
-        <Style>
-            <IconStyle>
-                <color>${this.getKMLColor(m.type)}</color>
-                <scale>1.0</scale>
-            </IconStyle>
-        </Style>
     </Placemark>`;
-            placemarks.push(placemark);
-        });
-        
-        // Добавляем сетку
-        if (this.gridSquares.length > 0) {
-            this.gridSquares.forEach(square => {
-                const bounds = square.bounds;
-                const coordinates = `
-            ${bounds.getSouthWest().lng},${bounds.getSouthWest().lat},0
-            ${bounds.getSouthEast().lng},${bounds.getSouthEast().lat},0
-            ${bounds.getNorthEast().lng},${bounds.getNorthEast().lat},0
-            ${bounds.getNorthWest().lng},${bounds.getNorthWest().lat},0
-            ${bounds.getSouthWest().lng},${bounds.getSouthWest().lat},0`;
-                
-                // Добавляем полигон квадрата
-                const placemark = `
+    }
+    
+    createKMLLinePlacemark({ name = '', styleUrl = '', latlngs }) {
+        const escapedName = this.escapeKMLText(name);
+        const styleUrlLine = styleUrl ? `\n        <styleUrl>${styleUrl}</styleUrl>` : '';
+        return `
     <Placemark>
-        <name>${square.name}</name>
+        <name>${escapedName}</name>${styleUrlLine}
+        <LineString>
+            <tessellate>1</tessellate>
+            <coordinates>${this.formatKMLCoordinateList(latlngs)}</coordinates>
+        </LineString>
+    </Placemark>`;
+    }
+    
+    createKMLPolygonPlacemark({ name = '', styleUrl = '', bounds }) {
+        const escapedName = this.escapeKMLText(name);
+        const styleUrlLine = styleUrl ? `\n        <styleUrl>${styleUrl}</styleUrl>` : '';
+        const coordinates = this.formatKMLCoordinateList([
+            bounds.getSouthWest(),
+            bounds.getSouthEast(),
+            bounds.getNorthEast(),
+            bounds.getNorthWest(),
+            bounds.getSouthWest()
+        ]);
+        return `
+    <Placemark>
+        <name>${escapedName}</name>${styleUrlLine}
         <Polygon>
             <outerBoundaryIs>
                 <LinearRing>
@@ -1857,47 +2152,57 @@ class KMZGenerator {
                 </LinearRing>
             </outerBoundaryIs>
         </Polygon>
-        <Style>
-            <LineStyle>
-                <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${exportGridLineWidth}</width>
-            </LineStyle>
-            <PolyStyle>
-                <color>00000000</color>
-            </PolyStyle>
-        </Style>
     </Placemark>`;
-                placemarks.push(placemark);
+    }
+    
+    buildKMLMarkerDescription(markerData) {
+        const parts = [];
+        parts.push(`Тип: ${this.getMarkerTypeName(markerData.type)}`);
+        if (markerData.name) {
+            parts.push(`Название: ${markerData.name}`);
+        }
+        if (markerData.description) {
+            parts.push(`Описание: ${markerData.description}`);
+        }
+        return parts.join('\n');
+    }
+    
+    generateKML() {
+        const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>';
+        const kmlHeader = '<kml xmlns="http://www.opengis.net/kml/2.2">';
+        const documentStart = '<Document>';
+        const styles = this.getKMLStyles();
+        const placemarks = [];
+        
+        this.markers.forEach(markerData => {
+            const markerName = this.showPointLabels
+                ? (markerData.name || this.getMarkerTypeName(markerData.type))
+                : '';
+            placemarks.push(this.createKMLPointPlacemark({
+                name: markerName,
+                description: this.buildKMLMarkerDescription(markerData),
+                styleUrl: this.getKMLMarkerStyleId(markerData.type),
+                latlng: markerData.latlng
+            }));
+        });
+        
+        if (this.gridSquares.length > 0) {
+            this.gridSquares.forEach(square => {
+                placemarks.push(this.createKMLPolygonPlacemark({
+                    name: square.name,
+                    styleUrl: '#gridSquareStyle',
+                    bounds: square.bounds
+                }));
                 
-                // Добавляем текстовую метку для квадрата (кроме A2)
-                if (square.name !== 'A2') {
-                    const center = square.center;
-                    const isA1 = square.name === 'A1';
-                    const labelText = isA1 ? `<${this.gridSize} м>` : square.name;
-                    
-                    // Создаем текстовую метку в центре квадрата
-                    const textPlacemark = `
-    <Placemark>
-        <name><![CDATA[${labelText}]]></name>
-        <styleUrl>#textLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${center.lng},${center.lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(textPlacemark);
+                if (this.showSquareNames && square.name !== 'A2') {
+                    const labelText = square.name === 'A1' ? `<${this.gridSize} м>` : square.name;
+                    placemarks.push(this.createKMLPointPlacemark({
+                        name: labelText,
+                        styleUrl: '#squareLabelStyle',
+                        latlng: square.center
+                    }));
                 }
                 
-                // Для A2 добавляем крест и цифры 1-4
                 if (square.name === 'A2') {
                     const bounds = square.bounds;
                     const center = square.center;
@@ -1906,301 +2211,113 @@ class KMZGenerator {
                     const se = bounds.getSouthEast();
                     const sw = bounds.getSouthWest();
                     
-                    // Крест - вертикальная линия
-                    const verticalLine = `
-    <Placemark>
-        <name>A2 Cross Vertical</name>
-        <LineString>
-            <coordinates>${center.lng},${bounds.getNorth()},0 ${center.lng},${bounds.getSouth()},0</coordinates>
-        </LineString>
-        <Style>
-            <LineStyle>
-                <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${exportGridLineWidth}</width>
-            </LineStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(verticalLine);
+                    placemarks.push(this.createKMLLinePlacemark({
+                        name: '',
+                        styleUrl: '#gridGuideLineStyle',
+                        latlngs: [
+                            L.latLng(bounds.getNorth(), center.lng),
+                            L.latLng(bounds.getSouth(), center.lng)
+                        ]
+                    }));
+                    placemarks.push(this.createKMLLinePlacemark({
+                        name: '',
+                        styleUrl: '#gridGuideLineStyle',
+                        latlngs: [
+                            L.latLng(center.lat, bounds.getWest()),
+                            L.latLng(center.lat, bounds.getEast())
+                        ]
+                    }));
                     
-                    // Крест - горизонтальная линия
-                    const horizontalLine = `
-    <Placemark>
-        <name>A2 Cross Horizontal</name>
-        <LineString>
-            <coordinates>${bounds.getWest()},${center.lat},0 ${bounds.getEast()},${center.lat},0</coordinates>
-        </LineString>
-        <Style>
-            <LineStyle>
-                <color>${this.getKMLColorFromHex(this.gridColor)}</color>
-                <width>${exportGridLineWidth}</width>
-            </LineStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(horizontalLine);
-                    
-                    // Цифры 1-4 в центре каждой четверти
-                    // 1 - левый верхний угол
-                    const part1Center = L.latLng((nw.lat + center.lat) / 2, (nw.lng + center.lng) / 2);
-                    const label1 = `
-    <Placemark>
-        <name><![CDATA[1]]></name>
-        <styleUrl>#textLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${part1Center.lng},${part1Center.lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(label1);
-                    
-                    // 2 - правый верхний угол
-                    const part2Center = L.latLng((ne.lat + center.lat) / 2, (ne.lng + center.lng) / 2);
-                    const label2 = `
-    <Placemark>
-        <name><![CDATA[2]]></name>
-        <styleUrl>#textLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${part2Center.lng},${part2Center.lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(label2);
-                    
-                    // 3 - правый нижний угол
-                    const part3Center = L.latLng((se.lat + center.lat) / 2, (se.lng + center.lng) / 2);
-                    const label3 = `
-    <Placemark>
-        <name><![CDATA[3]]></name>
-        <styleUrl>#textLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${part3Center.lng},${part3Center.lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(label3);
-                    
-                    // 4 - левый нижний угол
-                    const part4Center = L.latLng((sw.lat + center.lat) / 2, (sw.lng + center.lng) / 2);
-                    const label4 = `
-    <Placemark>
-        <name><![CDATA[4]]></name>
-        <styleUrl>#textLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${part4Center.lng},${part4Center.lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                    placemarks.push(label4);
+                    const parts = [
+                        { number: '1', center: L.latLng((nw.lat + center.lat) / 2, (nw.lng + center.lng) / 2) },
+                        { number: '2', center: L.latLng((ne.lat + center.lat) / 2, (ne.lng + center.lng) / 2) },
+                        { number: '3', center: L.latLng((se.lat + center.lat) / 2, (se.lng + center.lng) / 2) },
+                        { number: '4', center: L.latLng((sw.lat + center.lat) / 2, (sw.lng + center.lng) / 2) }
+                    ];
+                    parts.forEach(part => {
+                        placemarks.push(this.createKMLPointPlacemark({
+                            name: part.number,
+                            styleUrl: '#squareLabelStyle',
+                            latlng: part.center
+                        }));
+                    });
                 }
             });
         }
         
-        // Добавляем краевые метки
-        if (this.edgeLabels && this.edgeLabels.length > 0 && this.gridBounds && this.gridSquares.length > 0) {
-            const rows = [...new Set(this.gridSquares.map(s => s.row))].sort((a, b) => a - b);
-            const cols = [...new Set(this.gridSquares.map(s => s.col))].sort((a, b) => a - b);
-            
-            // Вычисляем смещение меток от края сетки
+        if (this.gridBounds && this.gridSquares.length > 0) {
+            const rows = [...new Set(this.gridSquares.map(square => square.row))].sort((a, b) => a - b);
+            const cols = [...new Set(this.gridSquares.map(square => square.col))].sort((a, b) => a - b);
             const sizeDegLat = this.gridSize / 111320;
             const centerLat = this.gridBounds.getCenter().lat;
             const sizeDegLng = this.gridSize / (111320 * Math.cos(centerLat * Math.PI / 180));
             const offsetLat = sizeDegLat * 0.08;
             const offsetLng = sizeDegLng * 0.08;
             
-            // Буквы слева
             if (this.showEdgeLeft) {
                 rows.forEach(row => {
-                    const square = this.gridSquares.find(s => s.row === row && s.col === cols[0]);
-                    if (square) {
-                        const normalizedRow = row >= 0 ? row : 26 + (row % 26);
-                        const letter = String.fromCharCode(65 + (normalizedRow % 26));
-                        const lat = square.center.lat;
-                        const lng = this.gridBounds.getWest() - offsetLng;
-                        
-                        const edgePlacemark = `
-    <Placemark>
-        <name><![CDATA[${letter}]]></name>
-        <styleUrl>#edgeLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${lng},${lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                        placemarks.push(edgePlacemark);
-                    }
+                    const square = this.gridSquares.find(item => item.row === row && item.col === cols[0]);
+                    if (!square) return;
+                    const normalizedRow = row >= 0 ? row : 26 + (row % 26);
+                    const letter = String.fromCharCode(65 + (normalizedRow % 26));
+                    placemarks.push(this.createKMLPointPlacemark({
+                        name: letter,
+                        styleUrl: '#edgeLabelStyle',
+                        latlng: L.latLng(square.center.lat, this.gridBounds.getWest() - offsetLng)
+                    }));
                 });
             }
             
-            // Буквы справа
             if (this.showEdgeRight) {
                 rows.forEach(row => {
-                    const square = this.gridSquares.find(s => s.row === row && s.col === cols[cols.length - 1]);
-                    if (square) {
-                        const normalizedRow = row >= 0 ? row : 26 + (row % 26);
-                        const letter = String.fromCharCode(65 + (normalizedRow % 26));
-                        const lat = square.center.lat;
-                        const lng = this.gridBounds.getEast() + offsetLng;
-                        
-                        const edgePlacemark = `
-    <Placemark>
-        <name><![CDATA[${letter}]]></name>
-        <styleUrl>#edgeLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${lng},${lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                        placemarks.push(edgePlacemark);
-                    }
+                    const square = this.gridSquares.find(item => item.row === row && item.col === cols[cols.length - 1]);
+                    if (!square) return;
+                    const normalizedRow = row >= 0 ? row : 26 + (row % 26);
+                    const letter = String.fromCharCode(65 + (normalizedRow % 26));
+                    placemarks.push(this.createKMLPointPlacemark({
+                        name: letter,
+                        styleUrl: '#edgeLabelStyle',
+                        latlng: L.latLng(square.center.lat, this.gridBounds.getEast() + offsetLng)
+                    }));
                 });
             }
             
-            // Цифры сверху
             if (this.showEdgeTop) {
                 cols.forEach(col => {
-                    const square = this.gridSquares.find(s => s.col === col && s.row === rows[0]);
-                    if (square) {
-                        const normalizedCol = col >= 0 ? col : Math.abs(col);
-                        const number = normalizedCol + 1;
-                        const lat = this.gridBounds.getNorth() + offsetLat;
-                        const lng = square.center.lng;
-                        
-                        const edgePlacemark = `
-    <Placemark>
-        <name><![CDATA[${number}]]></name>
-        <styleUrl>#edgeLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${lng},${lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                        placemarks.push(edgePlacemark);
-                    }
+                    const square = this.gridSquares.find(item => item.col === col && item.row === rows[0]);
+                    if (!square) return;
+                    const normalizedCol = col >= 0 ? col : Math.abs(col);
+                    placemarks.push(this.createKMLPointPlacemark({
+                        name: String(normalizedCol + 1),
+                        styleUrl: '#edgeLabelStyle',
+                        latlng: L.latLng(this.gridBounds.getNorth() + offsetLat, square.center.lng)
+                    }));
                 });
             }
             
-            // Цифры снизу
             if (this.showEdgeBottom) {
                 cols.forEach(col => {
-                    const square = this.gridSquares.find(s => s.col === col && s.row === rows[rows.length - 1]);
-                    if (square) {
-                        const normalizedCol = col >= 0 ? col : Math.abs(col);
-                        const number = normalizedCol + 1;
-                        const lat = this.gridBounds.getSouth() - offsetLat;
-                        const lng = square.center.lng;
-                        
-                        const edgePlacemark = `
-    <Placemark>
-        <name><![CDATA[${number}]]></name>
-        <styleUrl>#edgeLabelStyle</styleUrl>
-        <Point>
-            <coordinates>${lng},${lat},0</coordinates>
-        </Point>
-        <Style>
-            <IconStyle>
-                <color>FFFFFFFF</color>
-                <scale>0</scale>
-            </IconStyle>
-            <LabelStyle>
-                <color>FFFFFFFF</color>
-                <scale>0.4</scale>
-            </LabelStyle>
-        </Style>
-    </Placemark>`;
-                        placemarks.push(edgePlacemark);
-                    }
+                    const square = this.gridSquares.find(item => item.col === col && item.row === rows[rows.length - 1]);
+                    if (!square) return;
+                    const normalizedCol = col >= 0 ? col : Math.abs(col);
+                    placemarks.push(this.createKMLPointPlacemark({
+                        name: String(normalizedCol + 1),
+                        styleUrl: '#edgeLabelStyle',
+                        latlng: L.latLng(this.gridBounds.getSouth() - offsetLat, square.center.lng)
+                    }));
                 });
             }
         }
         
-        // Добавляем стили для текстовых меток
-        const labelStyle = `
-    <Style id="textLabelStyle">
-        <LabelStyle>
-            <color>FFFFFFFF</color>
-            <scale>0.4</scale>
-        </LabelStyle>
-        <IconStyle>
-            <scale>0</scale>
-        </IconStyle>
-    </Style>
-    <Style id="edgeLabelStyle">
-        <LabelStyle>
-            <color>FFFFFFFF</color>
-            <scale>0.4</scale>
-        </LabelStyle>
-        <IconStyle>
-            <scale>0</scale>
-        </IconStyle>
-    </Style>`;
-        
-        const documentEnd = '</Document>';
-        const kmlFooter = '</kml>';
-        
-        return xmlHeader + '\n' + kmlHeader + '\n' + documentStart + '\n' + 
-               labelStyle + '\n' + placemarks.join('\n') + '\n' + documentEnd + '\n' + kmlFooter;
+        return [
+            xmlHeader,
+            kmlHeader,
+            documentStart,
+            styles,
+            placemarks.join('\n'),
+            '</Document>',
+            '</kml>'
+        ].join('\n');
     }
     
     async importKMZ(file) {
@@ -2304,8 +2421,12 @@ class KMZGenerator {
                 const name = placemark.querySelector('name')?.textContent || '';
                 const description = placemark.querySelector('description')?.textContent || '';
                 const point = placemark.querySelector('Point');
+                const styleUrl = (placemark.querySelector('styleUrl')?.textContent || '').trim();
                 
                 if (point) {
+                    if (styleUrl === '#squareLabelStyle' || styleUrl === '#edgeLabelStyle') {
+                        return;
+                    }
                     const coordsText = point.querySelector('coordinates')?.textContent || '';
                     const coords = coordsText.trim().split(',');
                     if (coords.length >= 2) {
@@ -2361,7 +2482,7 @@ class KMZGenerator {
     
     inferMarkerTypeByText(text) {
         const value = (text || '').toLowerCase();
-        if (value.includes('предупреждение') || value.includes('warning') || value.includes('yellow') || value.includes('orange')) {
+        if (value.includes('предупреждение') || value.includes('warning') || value.includes('yellow') || value.includes('ylw') || value.includes('orange')) {
             return 'warning';
         }
         if (value.includes('опасность') || value.includes('danger') || value.includes('red') || value.includes('outer')) {
@@ -2370,10 +2491,10 @@ class KMZGenerator {
         if (value.includes('информация') || value.includes('info') || value.includes('purple')) {
             return 'info';
         }
-        if (value.includes('кпп') || value.includes('checkpoint') || value.includes('green')) {
+        if (value.includes('кпп') || value.includes('checkpoint') || value.includes('green') || value.includes('grn')) {
             return 'checkpoint';
         }
-        if (value.includes('стандарт') || value.includes('default') || value.includes('blue') || value.includes('inner')) {
+        if (value.includes('стандарт') || value.includes('default') || value.includes('blue') || value.includes('blu') || value.includes('inner')) {
             return 'default';
         }
         return null;
@@ -2611,6 +2732,320 @@ class KMZGenerator {
         return clamped.toFixed(1);
     }
     
+    escapeHtml(value) {
+        if (typeof value !== 'string') return '';
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+    
+    refreshLabelStyles() {
+        if (this.gridSquares && this.gridSquares.length > 0) {
+            this.gridSquares.forEach(square => {
+                if (square.label && this.map.hasLayer(square.label)) {
+                    this.map.removeLayer(square.label);
+                }
+                square.label = null;
+                this.drawSquareLabel(square);
+                if (square.name === 'A2') {
+                    this.drawSnail(square);
+                }
+            });
+            this.updateEdgeLabels();
+        }
+        this.updateMarkerLabels();
+        if (this.printPreviewMap) {
+            this.updatePrintPreview();
+        }
+    }
+    
+    getExportBoundsByMode() {
+        const modeElement = document.getElementById('export-zone-mode');
+        const mode = modeElement ? modeElement.value : 'grid';
+        
+        if (mode === 'selected-zone') {
+            if (!this.selectedZone) {
+                alert('Для этого режима сначала выберите зону на карте.');
+                return null;
+            }
+            return this.selectedZone;
+        }
+        
+        if (mode === 'current-view') {
+            return this.map.getBounds();
+        }
+        
+        if (this.gridBounds) {
+            return this.gridBounds;
+        }
+        
+        if (this.selectedZone) {
+            return this.selectedZone;
+        }
+        
+        return this.map.getBounds();
+    }
+    
+    getBufferedGridBounds(bufferMeters = 30) {
+        if (!this.gridBounds) return null;
+        const centerLat = this.gridBounds.getCenter().lat;
+        const deltaLat = bufferMeters / 111320;
+        const deltaLng = bufferMeters / (111320 * Math.cos(centerLat * Math.PI / 180));
+        return L.latLngBounds(
+            [this.gridBounds.getSouth() - deltaLat, this.gridBounds.getWest() - deltaLng],
+            [this.gridBounds.getNorth() + deltaLat, this.gridBounds.getEast() + deltaLng]
+        );
+    }
+    
+    getMarkerBounds() {
+        if (!this.markers || this.markers.length === 0) return null;
+        const points = this.markers
+            .map(markerData => markerData?.latlng)
+            .filter(Boolean);
+        if (points.length === 0) return null;
+        return L.latLngBounds(points);
+    }
+    
+    getBoundsSizeMeters(bounds) {
+        if (!bounds) {
+            return { widthMeters: 1, heightMeters: 1 };
+        }
+        const centerLat = bounds.getCenter().lat;
+        const widthMeters = Math.max(
+            1,
+            (bounds.getEast() - bounds.getWest()) * 111320 * Math.cos(centerLat * Math.PI / 180)
+        );
+        const heightMeters = Math.max(
+            1,
+            (bounds.getNorth() - bounds.getSouth()) * 111320
+        );
+        return { widthMeters, heightMeters };
+    }
+    
+    getPngExportBounds() {
+        const baseBounds = this.getBufferedGridBounds(30) || this.getPreviewBounds();
+        if (!baseBounds) return null;
+        
+        const exportBounds = L.latLngBounds(
+            [baseBounds.getSouth(), baseBounds.getWest()],
+            [baseBounds.getNorth(), baseBounds.getEast()]
+        );
+        
+        const markerBounds = this.getMarkerBounds();
+        if (markerBounds) {
+            exportBounds.extend(markerBounds.getSouthWest());
+            exportBounds.extend(markerBounds.getNorthEast());
+        }
+        
+        return exportBounds;
+    }
+    
+    getPngExportSize(bounds) {
+        const { widthMeters, heightMeters } = this.getBoundsSizeMeters(bounds);
+        const aspectRatio = Math.max(0.15, Math.min(6, widthMeters / heightMeters));
+        const longSidePx = 5000;
+        const minShortSidePx = 1800;
+        
+        let widthPx;
+        let heightPx;
+        if (aspectRatio >= 1) {
+            widthPx = longSidePx;
+            heightPx = Math.round(widthPx / aspectRatio);
+        } else {
+            heightPx = longSidePx;
+            widthPx = Math.round(heightPx * aspectRatio);
+        }
+        
+        if (Math.min(widthPx, heightPx) < minShortSidePx) {
+            const scale = minShortSidePx / Math.min(widthPx, heightPx);
+            widthPx = Math.round(widthPx * scale);
+            heightPx = Math.round(heightPx * scale);
+        }
+        
+        return {
+            widthPx: Math.max(1200, widthPx),
+            heightPx: Math.max(1200, heightPx)
+        };
+    }
+    
+    getPreviewBounds() {
+        // Для печати и HighRes PNG приоритет: вся сетка + 30м
+        const bufferedGrid = this.getBufferedGridBounds(30);
+        if (bufferedGrid) return bufferedGrid;
+        
+        const selectedMode = document.getElementById('export-zone-mode')?.value;
+        if (selectedMode === 'selected-zone' && this.selectedZone) return this.selectedZone;
+        if (selectedMode === 'current-view') return this.map.getBounds();
+        
+        return this.gridBounds || this.selectedZone || this.map.getBounds();
+    }
+    
+    waitForPreviewReady(timeoutMs = 6000) {
+        if (!this.previewReadyPromise) {
+            return Promise.resolve(!!this.printPreviewMap);
+        }
+        return Promise.race([
+            this.previewReadyPromise.then(() => true).catch(() => false),
+            new Promise(resolve => setTimeout(() => resolve(false), timeoutMs))
+        ]);
+    }
+    
+    waitForMapMoveEnd(map, timeoutMs = 3000) {
+        return new Promise(resolve => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                resolve();
+            };
+            const timeoutId = setTimeout(finish, timeoutMs);
+            map.once('moveend', () => {
+                clearTimeout(timeoutId);
+                finish();
+            });
+        });
+    }
+    
+    waitForTilesLoaded(map, timeoutMs = 5000) {
+        return new Promise(resolve => {
+            const start = Date.now();
+            const check = () => {
+                if (!map) {
+                    resolve();
+                    return;
+                }
+                let pending = 0;
+                map.eachLayer(layer => {
+                    if (layer instanceof L.TileLayer) {
+                        const tiles = layer._tiles || {};
+                        Object.values(tiles).forEach(tile => {
+                            if (!tile.loaded) {
+                                pending += 1;
+                            }
+                        });
+                    }
+                });
+                
+                if (pending === 0 || Date.now() - start > timeoutMs) {
+                    resolve();
+                    return;
+                }
+                setTimeout(check, 120);
+            };
+            check();
+        });
+    }
+    
+    async ensurePreviewMapRender(bounds, padding = [40, 40]) {
+        if (!this.printPreviewMap || !bounds) return;
+        this.printPreviewMap.invalidateSize();
+        this.printPreviewMap.fitBounds(bounds, { padding });
+        await this.waitForMapMoveEnd(this.printPreviewMap, 3000);
+        await this.waitForTilesLoaded(this.printPreviewMap, 5000);
+        await new Promise(resolve => setTimeout(resolve, 120));
+    }
+    
+    shiftGrid(direction) {
+        if (!this.gridSquares || this.gridSquares.length === 0 || !this.gridBounds) {
+            alert('Сначала создайте сетку.');
+            return;
+        }
+        
+        const stepMeters = Math.max(1, Number(this.gridShiftStepMeters) || 10);
+        const centerLat = this.gridBounds.getCenter().lat;
+        const deltaLat = stepMeters / 111320;
+        const deltaLng = stepMeters / (111320 * Math.cos(centerLat * Math.PI / 180));
+        
+        let moveLat = 0;
+        let moveLng = 0;
+        if (direction === 'up') moveLat = deltaLat;
+        if (direction === 'down') moveLat = -deltaLat;
+        if (direction === 'left') moveLng = -deltaLng;
+        if (direction === 'right') moveLng = deltaLng;
+        
+        if (moveLat === 0 && moveLng === 0) return;
+        
+        // Сдвигаем квадраты и их геометрию
+        this.gridSquares.forEach(square => {
+            const b = square.bounds;
+            square.bounds = L.latLngBounds(
+                [b.getSouth() + moveLat, b.getWest() + moveLng],
+                [b.getNorth() + moveLat, b.getEast() + moveLng]
+            );
+            square.center = L.latLng(square.center.lat + moveLat, square.center.lng + moveLng);
+        });
+        
+        // Сдвигаем общие границы сетки
+        const gb = this.gridBounds;
+        this.gridBounds = L.latLngBounds(
+            [gb.getSouth() + moveLat, gb.getWest() + moveLng],
+            [gb.getNorth() + moveLat, gb.getEast() + moveLng]
+        );
+        
+        // Если есть выбранная зона - сдвигаем и ее, чтобы состояние проекта оставалось консистентным
+        if (this.selectedZone) {
+            this.selectedZone = L.latLngBounds(
+                [this.selectedZone.getSouth() + moveLat, this.selectedZone.getWest() + moveLng],
+                [this.selectedZone.getNorth() + moveLat, this.selectedZone.getEast() + moveLng]
+            );
+        }
+        
+        if (this.zoneRectangle) {
+            this.map.removeLayer(this.zoneRectangle);
+            this.zoneRectangle = null;
+        }
+        
+        this.rebuildGridVisuals();
+    }
+    
+    rebuildGridVisuals() {
+        if (!this.gridSquares || this.gridSquares.length === 0) return;
+        
+        this.gridSquares.forEach(square => {
+            if (square.polygon && this.map.hasLayer(square.polygon)) {
+                this.map.removeLayer(square.polygon);
+            }
+            if (square.label && this.map.hasLayer(square.label)) {
+                this.map.removeLayer(square.label);
+            }
+            if (square.snailLines) {
+                square.snailLines.forEach(line => {
+                    if (this.map.hasLayer(line)) this.map.removeLayer(line);
+                });
+            }
+            if (square.snailLabels) {
+                square.snailLabels.forEach(label => {
+                    if (this.map.hasLayer(label)) this.map.removeLayer(label);
+                });
+            }
+            
+            square.polygon = L.polygon([
+                square.bounds.getNorthWest(),
+                square.bounds.getNorthEast(),
+                square.bounds.getSouthEast(),
+                square.bounds.getSouthWest()
+            ], {
+                color: this.gridColor,
+                weight: this.gridWeight,
+                fill: false,
+                interactive: false
+            }).addTo(this.map);
+            
+            square.label = null;
+            this.drawSquareLabel(square);
+            
+            if (square.name === 'A2') {
+                this.drawSnail(square);
+            }
+        });
+        
+        this.updateEdgeLabels();
+        this.updateGridDisplay();
+    }
+    
     clearAll() {
         this.clearGrid();
         this.clearSelectedZone();
@@ -2643,9 +3078,13 @@ class KMZGenerator {
     updatePrintPreview() {
         console.log('updatePrintPreview вызван');
         const container = document.getElementById('print-preview-container');
+        this.previewReadyPromise = new Promise(resolve => {
+            this.resolvePreviewReady = resolve;
+        });
         
         if (!container) {
             console.error('Контейнер print-preview-container не найден!');
+            if (this.resolvePreviewReady) this.resolvePreviewReady(false);
             return;
         }
         
@@ -2671,15 +3110,11 @@ class KMZGenerator {
         
         container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #666;">Загрузка предпросмотра...</div>';
         
-        // Используем границы сетки если есть, иначе выбранную зону
-        const previewBounds = this.gridBounds || this.selectedZone || this.map.getBounds();
+        // Выбор зоны экспорта (по сетке / по выделенной зоне / текущий экран)
+        const previewBounds = this.getPreviewBounds();
         if (!previewBounds) {
             container.innerHTML = '<p style="padding: 2rem; color: #999; text-align: center;">Выберите зону для печати или создайте сетку</p>';
-            return;
-        }
-        
-        if (!this.gridSquares || this.gridSquares.length === 0) {
-            container.innerHTML = '<p style="padding: 2rem; color: #999; text-align: center;">Сначала создайте сетку</p>';
+            if (this.resolvePreviewReady) this.resolvePreviewReady(false);
             return;
         }
         
@@ -2704,6 +3139,7 @@ class KMZGenerator {
                 if (!mapElement) {
                     console.error('Элемент print-preview-map не найден');
                     container.innerHTML = '<p style="padding: 2rem; color: #dc3545; text-align: center;">Ошибка: контейнер карты не найден</p>';
+                    if (this.resolvePreviewReady) this.resolvePreviewReady(false);
                     return;
                 }
                 
@@ -2773,20 +3209,20 @@ class KMZGenerator {
                     try {
                         // Обновляем размер карты и границы
                         this.printPreviewMap.invalidateSize();
-                        this.printPreviewMap.fitBounds(previewBounds, { padding: [20, 20] });
+                        this.printPreviewMap.fitBounds(previewBounds, { padding: [40, 40] });
+                        const fittedZoom = this.printPreviewMap.getZoom();
                         
                         // Настраиваем ползунок масштаба
                         const zoomSlider = document.getElementById('preview-zoom');
                         const zoomValue = document.getElementById('preview-zoom-value');
                         if (zoomSlider && zoomValue) {
-                            const currentZoom = this.printPreviewMap.getZoom();
                             const minZoom = this.printPreviewMap.getMinZoom();
                             const maxZoom = this.printPreviewMap.getMaxZoom();
                             
                             zoomSlider.min = String(minZoom);
                             zoomSlider.max = String(maxZoom);
-                            zoomSlider.value = String(currentZoom);
-                            zoomValue.textContent = currentZoom.toFixed(1);
+                            zoomSlider.value = String(fittedZoom);
+                            zoomValue.textContent = fittedZoom.toFixed(1);
                             
                             zoomSlider.oninput = (e) => {
                                 const z = parseFloat(e.target.value);
@@ -2854,13 +3290,14 @@ class KMZGenerator {
                                             html: `<div style="
                                                 background: transparent;
                                                 padding: 0;
-                                                font-size: 11px;
+                                                font-size: ${this.squareLabelFontSize}px;
                                                 font-weight: bold;
                                                 color: white;
                                                 pointer-events: none;
                                                 user-select: none;
                                                 white-space: nowrap;
                                                 text-align: ${isA1 ? 'center' : 'right'};
+                                                font-family: ${this.labelFontFamily};
                                             ">${labelText}</div>`,
                                             iconSize: isA1 ? [80, 18] : [60, 16],
                                             iconAnchor: isA1 ? [40, 9] : [60, 16]
@@ -2922,14 +3359,14 @@ class KMZGenerator {
                                                             background: transparent;
                                                             border: none;
                                                             padding: 0;
-                                                            font-size: 16px;
+                                                            font-size: ${this.squareLabelFontSize + 5}px;
                                                             font-weight: bold;
                                                             color: white;
                                                             pointer-events: none;
                                                             user-select: none;
                                                             text-align: center;
                                                             line-height: 1;
-                                                            font-family: Arial, sans-serif;
+                                                            font-family: ${this.labelFontFamily};
                                                         ">${part.number}</div>`,
                                                         iconSize: [24, 24],
                                                         iconAnchor: [12, 12]
@@ -2954,6 +3391,18 @@ class KMZGenerator {
                                     icon: m.marker.options.icon,
                                     interactive: false
                                 });
+                                if (this.showPointLabels && m.name) {
+                                    marker.bindTooltip(
+                                        `<span style="font-size:${this.pointLabelFontSize}px;font-weight:600;font-family:${this.labelFontFamily};color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;">${this.escapeHtml(m.name)}</span>`,
+                                        {
+                                            permanent: true,
+                                            direction: 'top',
+                                            offset: [0, -12],
+                                            className: 'marker-name-tooltip',
+                                            interactive: false
+                                        }
+                                    );
+                                }
                                 marker.addTo(this.printPreviewMap);
                             });
                         }
@@ -2967,9 +3416,11 @@ class KMZGenerator {
                         this.updatePreviewFontSizes();
                         
                         console.log('Элементы добавлены на карту предпросмотра');
+                        if (this.resolvePreviewReady) this.resolvePreviewReady(true);
                         } catch (error) {
                             console.error('Ошибка при добавлении элементов:', error);
                             container.innerHTML = '<p style="padding: 2rem; color: #dc3545; text-align: center;">Ошибка при добавлении элементов: ' + error.message + '</p>';
+                            if (this.resolvePreviewReady) this.resolvePreviewReady(false);
                         }
                 }, 500);
                 
@@ -2983,12 +3434,13 @@ class KMZGenerator {
             } catch (error) {
                 console.error('Ошибка при создании карты предпросмотра:', error);
                 container.innerHTML = '<p style="padding: 2rem; color: #dc3545; text-align: center;">Ошибка при создании предпросмотра: ' + error.message + '</p>';
+                if (this.resolvePreviewReady) this.resolvePreviewReady(false);
             }
         }, 300);
     }
     
     // Экспорт карты для печати в высоком разрешении
-    async exportPrintImage() {
+    async exportPrintImage(format = 'pdf') {
         if (!this.printPreviewMap) {
             alert('Карта предпросмотра не готова');
             return;
@@ -2997,11 +3449,18 @@ class KMZGenerator {
         const paperSize = document.getElementById('paper-size').value;
         const orientation = document.getElementById('orientation').value;
         
-        // Определяем размеры в пикселях для высокого разрешения (300 DPI)
-        // A4: 210x297mm или 2480x3508px при 300 DPI
-        // A3: 297x420mm или 3508x4961px при 300 DPI
         let widthPx, heightPx;
-        if (paperSize === 'A4') {
+        let exportBounds = null;
+        if (format === 'png') {
+            exportBounds = this.getPngExportBounds();
+            if (!exportBounds) {
+                alert('Нет данных для экспорта PNG.');
+                return;
+            }
+            const pngSize = this.getPngExportSize(exportBounds);
+            widthPx = pngSize.widthPx;
+            heightPx = pngSize.heightPx;
+        } else if (paperSize === 'A4') {
             widthPx = orientation === 'portrait' ? 2480 : 3508;
             heightPx = orientation === 'portrait' ? 3508 : 2480;
         } else { // A3
@@ -3009,27 +3468,47 @@ class KMZGenerator {
             heightPx = orientation === 'portrait' ? 4961 : 3508;
         }
         
+        let actionBtn = null;
+        let originalText = '';
+        let mapContainer = null;
+        let originalWidth = '';
+        let originalHeight = '';
+        let originalMinHeight = '';
+        let resizedForPng = false;
+        
         try {
             // Показываем индикатор загрузки
-            const printBtn = document.getElementById('print-btn');
-            const originalText = printBtn.textContent;
-            printBtn.textContent = 'Создание изображения...';
-            printBtn.disabled = true;
-            
-            // Ждем, пока все тайлы загрузятся
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Обновляем размер карты
-            this.printPreviewMap.invalidateSize();
-            await new Promise(resolve => setTimeout(resolve, 200));
+            actionBtn = format === 'png'
+                ? document.getElementById('export-png-btn')
+                : document.getElementById('print-btn');
+            originalText = actionBtn.textContent;
+            actionBtn.textContent = format === 'png' ? 'Создание PNG...' : 'Создание PDF...';
+            actionBtn.disabled = true;
             
             // Получаем контейнер карты
-            const mapContainer = this.printPreviewMap.getContainer();
+            mapContainer = this.printPreviewMap.getContainer();
+            const renderBounds = format === 'png' ? exportBounds : this.getPreviewBounds();
+            if (!renderBounds) {
+                throw new Error('Нет доступных границ для экспорта');
+            }
+            
+            originalWidth = mapContainer.style.width;
+            originalHeight = mapContainer.style.height;
+            originalMinHeight = mapContainer.style.minHeight;
+            
+            // PNG рендерим в большом целевом размере, чтобы качество не зависело от текущего окна предпросмотра
+            if (format === 'png') {
+                mapContainer.style.width = `${widthPx}px`;
+                mapContainer.style.height = `${heightPx}px`;
+                mapContainer.style.minHeight = `${heightPx}px`;
+                resizedForPng = true;
+            }
+            
+            await this.ensurePreviewMapRender(renderBounds, format === 'png' ? [16, 16] : [40, 40]);
             
             // Создаем изображение с высоким разрешением
-            // Используем scale=3 для увеличения разрешения
             const canvas = await html2canvas(mapContainer, {
-                scale: 3, // Высокое разрешение
+                scale: format === 'png' ? 1 : 3,
                 useCORS: true,
                 logging: false,
                 width: mapContainer.offsetWidth,
@@ -3038,6 +3517,17 @@ class KMZGenerator {
                 windowWidth: mapContainer.scrollWidth,
                 windowHeight: mapContainer.scrollHeight
             });
+            
+            if (format === 'png') {
+                const a = document.createElement('a');
+                a.href = canvas.toDataURL('image/png');
+                a.download = `map_hires_${widthPx}x${heightPx}_${new Date().getTime()}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                alert('PNG создан: аккуратный кадр по сетке и точкам.');
+                return;
+            }
             
             // Создаем новый canvas с нужным размером для печати
             const printCanvas = document.createElement('canvas');
@@ -3063,16 +3553,14 @@ class KMZGenerator {
             // Рисуем карту на canvas для печати
             ctx.drawImage(canvas, x, y, scaledWidth, scaledHeight);
             
-            // Создаем PDF
+            const imgData = printCanvas.toDataURL('image/png', 1.0);
+            
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({
                 orientation: orientation === 'landscape' ? 'landscape' : 'portrait',
                 unit: 'mm',
                 format: paperSize.toLowerCase()
             });
-            
-            // Добавляем изображение в PDF
-            const imgData = printCanvas.toDataURL('image/png', 1.0);
             pdf.addImage(imgData, 'PNG', 0, 0, 
                 orientation === 'landscape' ? 
                     (paperSize === 'A4' ? 297 : 420) : 
@@ -3081,25 +3569,35 @@ class KMZGenerator {
                     (paperSize === 'A4' ? 210 : 297) : 
                     (paperSize === 'A4' ? 297 : 420)
             );
-            
-            // Сохраняем PDF
             const fileName = `map_print_${paperSize}_${orientation}_${new Date().getTime()}.pdf`;
             pdf.save(fileName);
-            
-            // Восстанавливаем состояние кнопки
-            printBtn.textContent = originalText;
-            printBtn.disabled = false;
-            
             alert('PDF файл успешно создан!');
+            
         } catch (error) {
             console.error('Ошибка при создании изображения:', error);
-            alert('Ошибка при создании PDF: ' + error.message);
+            alert('Ошибка при создании файла: ' + error.message);
             
             // Восстанавливаем состояние кнопки в случае ошибки
             const printBtn = document.getElementById('print-btn');
+            const pngBtn = document.getElementById('export-png-btn');
             if (printBtn) {
                 printBtn.textContent = 'Печать';
                 printBtn.disabled = false;
+            }
+            if (pngBtn) {
+                pngBtn.textContent = 'Экспорт HiRes PNG';
+                pngBtn.disabled = false;
+            }
+        } finally {
+            if (mapContainer && resizedForPng) {
+                mapContainer.style.width = originalWidth;
+                mapContainer.style.height = originalHeight;
+                mapContainer.style.minHeight = originalMinHeight;
+                await this.ensurePreviewMapRender(this.getPreviewBounds(), [40, 40]);
+            }
+            if (actionBtn) {
+                actionBtn.textContent = originalText;
+                actionBtn.disabled = false;
             }
         }
     }
