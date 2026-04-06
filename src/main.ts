@@ -10,6 +10,7 @@ import { initTabMarkers } from './ui/tab-markers';
 import { initTabFile } from './ui/tab-file';
 import { initExportPanel } from './ui/export-panel';
 import { showPngPreviewModal } from './ui/modal-png';
+import { exportKmz, exportKml } from './export/kmz';
 // Import render modules to register event listeners
 import './core/grid-render';
 import './core/markers-render';
@@ -23,10 +24,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabMarkers();
   initTabFile();
   initExportPanel({
-    onExportKMZ: () => alert('KMZ экспорт — будет реализован'),
-    onExportKML: () => alert('KML экспорт — будет реализован'),
-    onExportPNG: () => showPngPreviewModal((zone, zoom) => {
-      alert(`PNG экспорт: зона=${zone}, zoom=${zoom}`);
+    onExportKMZ: () => exportKmz(),
+    onExportKML: () => exportKml(),
+    onExportPNG: () => showPngPreviewModal((_zone, _zoom) => {
+      alert(`PNG экспорт — будет реализован`);
     }),
   });
 });
