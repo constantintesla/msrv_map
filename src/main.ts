@@ -5,6 +5,8 @@ import { initMap } from './core/map';
 import { initSidebar, initCollapsibles } from './ui/sidebar';
 import { initTabMap } from './ui/tab-map';
 import { initTabGrid } from './ui/tab-grid';
+import { initTabMarkers } from './ui/tab-markers';
+import { initTabFile } from './ui/tab-file';
 // Import render modules to register event listeners
 import './core/grid-render';
 import './core/markers-render';
@@ -15,4 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initCollapsibles();
   initTabMap();
   initTabGrid();
+  initTabMarkers();
+  initTabFile();
 });
