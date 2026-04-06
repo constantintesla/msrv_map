@@ -6,27 +6,32 @@ import { getSquareName, getGridRows, getGridCols } from '../core/grid';
 import { downloadBlob } from '../utils/download';
 import { MARKER_COLORS, PNG_MAX_SIDE, PNG_MIN_SIDE, PNG_BUFFER_METERS } from '../constants';
 
-/** Export high-res PNG */
-export async function exportPng(zoneMode: string, zoomOverride?: number): Promise<void> {
+/** Get recommended zoom for a given zone mode */
+export function getRecommendedZoom(zoneMode: string): number {
   const bounds = getExportBounds(zoneMode);
-  if (!bounds) {
-    alert('Нет данных для экспорта.');
-    return;
-  }
+  if (!bounds) return 16;
+  return pickZoom(bounds, PNG_MAX_SIDE);
+}
+
+/** Render map to a canvas and return it */
+export async function renderToCanvas(zoneMode: string, zoomOverride?: number, maxSide?: number): Promise<HTMLCanvasElement | null> {
+  const bounds = getExportBounds(zoneMode);
+  if (!bounds) return null;
 
   const [widthM, heightM] = boundsSizeMeters(bounds);
   const aspect = widthM / heightM;
+  const max = maxSide ?? PNG_MAX_SIDE;
+  const min = maxSide ? Math.round(max / 3) : PNG_MIN_SIDE;
 
   let canvasW: number, canvasH: number;
   if (aspect >= 1) {
-    canvasW = PNG_MAX_SIDE;
-    canvasH = Math.max(PNG_MIN_SIDE, Math.round(PNG_MAX_SIDE / aspect));
+    canvasW = max;
+    canvasH = Math.max(min, Math.round(max / aspect));
   } else {
-    canvasH = PNG_MAX_SIDE;
-    canvasW = Math.max(PNG_MIN_SIDE, Math.round(PNG_MAX_SIDE * aspect));
+    canvasH = max;
+    canvasW = Math.max(min, Math.round(max * aspect));
   }
 
-  // Pick zoom level
   const zoom = zoomOverride
     ? Math.round(zoomOverride)
     : pickZoom(bounds, canvasW);
@@ -38,16 +43,21 @@ export async function exportPng(zoneMode: string, zoomOverride?: number): Promis
   canvas.height = canvasH;
   const ctx = canvas.getContext('2d')!;
 
-  // 1. Load tiles
   await loadTiles(ctx, proj);
-
-  // 2. Draw grid
   drawGrid(ctx, proj);
-
-  // 3. Draw markers
   drawMarkers(ctx, proj);
 
-  // 4. Export
+  return canvas;
+}
+
+/** Export high-res PNG */
+export async function exportPng(zoneMode: string, zoomOverride?: number): Promise<void> {
+  const canvas = await renderToCanvas(zoneMode, zoomOverride);
+  if (!canvas) {
+    alert('Нет данных для экспорта.');
+    return;
+  }
+
   canvas.toBlob(blob => {
     if (blob) downloadBlob(blob, 'map.png');
   }, 'image/png');
@@ -74,7 +84,7 @@ function pickZoom(bounds: Bounds, canvasW: number): number {
     const xMin = lngToMercatorX(bounds.west, z);
     const xMax = lngToMercatorX(bounds.east, z);
     const tilePixels = xMax - xMin;
-    if (tilePixels >= canvasW / 2) return z;
+    if (tilePixels >= canvasW) return z;
   }
   return 14;
 }

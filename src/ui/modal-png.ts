@@ -1,10 +1,13 @@
 import { $ } from '../utils/dom';
+import { renderToCanvas, getRecommendedZoom } from '../export/png-renderer';
 
 let modalVisible = false;
 
 export function showPngPreviewModal(onExport: (zoneMode: string, zoom: number) => void): void {
   if (modalVisible) return;
   modalVisible = true;
+
+  const defaultZoom = getRecommendedZoom('grid');
 
   const overlay = $<HTMLDivElement>('#modal-overlay');
   overlay.style.display = 'flex';
@@ -26,13 +29,13 @@ export function showPngPreviewModal(onExport: (zoneMode: string, zoom: number) =
           </div>
           <div class="field--inline">
             <label class="label" style="margin:0;">Масштаб:</label>
-            <input type="range" id="range-png-zoom" min="10" max="18" step="0.5" value="14" style="width:120px;">
-            <span id="png-zoom-value" style="font-size:0.8rem;min-width:24px;">14</span>
+            <input type="range" id="range-png-zoom" min="10" max="19" step="0.5" value="${defaultZoom}" style="width:120px;">
+            <span id="png-zoom-value" style="font-size:0.8rem;min-width:24px;">${defaultZoom}</span>
           </div>
         </div>
         <div class="preview-container" id="png-preview-container">
-          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-secondary);font-size:0.85rem;">
-            Предпросмотр будет здесь
+          <div class="preview-loading" id="png-preview-loading" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-secondary);font-size:0.85rem;">
+            Загрузка предпросмотра...
           </div>
         </div>
       </div>
@@ -45,14 +48,55 @@ export function showPngPreviewModal(onExport: (zoneMode: string, zoom: number) =
 
   const zoomRange = $<HTMLInputElement>('#range-png-zoom');
   const zoomValue = $<HTMLSpanElement>('#png-zoom-value');
+  const previewContainer = $<HTMLDivElement>('#png-preview-container');
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function updatePreview() {
+    const loading = document.getElementById('png-preview-loading');
+    if (!loading) {
+      previewContainer.innerHTML = '<div id="png-preview-loading" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-secondary);font-size:0.85rem;">Загрузка предпросмотра...</div>';
+    } else {
+      loading.style.display = 'flex';
+    }
+
+    const zoneMode = $<HTMLSelectElement>('#select-png-zone').value;
+    const zoom = parseFloat(zoomRange.value);
+
+    const canvas = await renderToCanvas(zoneMode, zoom, 800);
+    if (!modalVisible) return;
+
+    previewContainer.innerHTML = '';
+    if (canvas) {
+      canvas.style.maxWidth = '100%';
+      canvas.style.maxHeight = '100%';
+      canvas.style.objectFit = 'contain';
+      previewContainer.appendChild(canvas);
+    } else {
+      previewContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-secondary);font-size:0.85rem;">Нет данных для предпросмотра</div>';
+    }
+  }
+
+  function schedulePreview() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(updatePreview, 300);
+  }
+
   zoomRange.addEventListener('input', () => {
     zoomValue.textContent = zoomRange.value;
+    schedulePreview();
   });
 
+  $<HTMLSelectElement>('#select-png-zone').addEventListener('change', schedulePreview);
+
+  // Initial preview
+  updatePreview();
+
   function close() {
+    modalVisible = false;
+    if (debounceTimer) clearTimeout(debounceTimer);
     overlay.style.display = 'none';
     overlay.innerHTML = '';
-    modalVisible = false;
   }
 
   $<HTMLButtonElement>('#btn-close-png').addEventListener('click', close);
@@ -65,12 +109,10 @@ export function showPngPreviewModal(onExport: (zoneMode: string, zoom: number) =
     onExport(zoneMode, zoom);
   });
 
-  // Close on overlay click
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close();
   });
 
-  // Close on Escape
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
   };

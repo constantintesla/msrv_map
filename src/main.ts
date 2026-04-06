@@ -19,11 +19,11 @@ import './core/markers-render';
 document.addEventListener('DOMContentLoaded', () => {
   initMap('map');
   initSidebar();
-  initCollapsibles();
   initTabMap();
   initTabGrid();
   initTabMarkers();
   initTabFile();
+  initCollapsibles();
   initExportPanel({
     onExportKMZ: () => exportKmz(),
     onExportKML: () => exportKml(),
