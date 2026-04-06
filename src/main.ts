@@ -11,6 +11,7 @@ import { initTabFile } from './ui/tab-file';
 import { initExportPanel } from './ui/export-panel';
 import { showPngPreviewModal } from './ui/modal-png';
 import { exportKmz, exportKml } from './export/kmz';
+import { exportPng } from './export/png-renderer';
 // Import render modules to register event listeners
 import './core/grid-render';
 import './core/markers-render';
@@ -26,8 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initExportPanel({
     onExportKMZ: () => exportKmz(),
     onExportKML: () => exportKml(),
-    onExportPNG: () => showPngPreviewModal((_zone, _zoom) => {
-      alert(`PNG экспорт — будет реализован`);
+    onExportPNG: () => showPngPreviewModal((zoneMode, zoom) => {
+      exportPng(zoneMode, zoom);
     }),
   });
 });
