@@ -7,7 +7,43 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <header class="header">
+      <h1 class="header__title">Генератор карт</h1>
+      <nav class="header__nav">
+        <a href="/" class="header__link header__link--active">Карта</a>
+        <a href="/converter.html" class="header__link">Конвертер</a>
+      </nav>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="tabs">
+          <button class="tabs__btn tabs__btn--active" data-tab="map">🗺️</button>
+          <button class="tabs__btn" data-tab="grid">📐</button>
+          <button class="tabs__btn" data-tab="markers">📍</button>
+          <button class="tabs__btn" data-tab="file">💾</button>
+        </div>
+
+        <div class="sidebar__content">
+          <div class="tab-panel tab-panel--active" data-panel="map" id="tab-map"></div>
+          <div class="tab-panel" data-panel="grid" id="tab-grid"></div>
+          <div class="tab-panel" data-panel="markers" id="tab-markers"></div>
+          <div class="tab-panel" data-panel="file" id="tab-file"></div>
+        </div>
+
+        <div class="export-panel" id="export-panel"></div>
+      </aside>
+
+      <main class="map-wrapper">
+        <div id="map" class="map"></div>
+        <div id="mode-indicator" class="mode-indicator" style="display:none;"></div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-overlay" class="modal-overlay" style="display:none;"></div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

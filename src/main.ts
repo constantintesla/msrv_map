@@ -1,13 +1,14 @@
+import '../styles/main.css';
+import '../styles/sidebar.css';
+import '../styles/map.css';
 import { initMap } from './core/map';
-import { createGrid } from './core/grid-render';
+import { initSidebar, initCollapsibles } from './ui/sidebar';
+// Import render modules to register event listeners
+import './core/grid-render';
+import './core/markers-render';
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <div id="map" style="width:100vw;height:100vh;"></div>
-`;
-
-const map = initMap('map');
-
-// Temp test: create grid after map loads
-map.whenReady(() => {
-  setTimeout(() => createGrid(), 500);
+document.addEventListener('DOMContentLoaded', () => {
+  initMap('map');
+  initSidebar();
+  initCollapsibles();
 });
