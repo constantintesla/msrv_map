@@ -1,12 +1,15 @@
 import '../styles/main.css';
 import '../styles/sidebar.css';
 import '../styles/map.css';
+import '../styles/modals.css';
 import { initMap } from './core/map';
 import { initSidebar, initCollapsibles } from './ui/sidebar';
 import { initTabMap } from './ui/tab-map';
 import { initTabGrid } from './ui/tab-grid';
 import { initTabMarkers } from './ui/tab-markers';
 import { initTabFile } from './ui/tab-file';
+import { initExportPanel } from './ui/export-panel';
+import { showPngPreviewModal } from './ui/modal-png';
 // Import render modules to register event listeners
 import './core/grid-render';
 import './core/markers-render';
@@ -19,4 +22,11 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabGrid();
   initTabMarkers();
   initTabFile();
+  initExportPanel({
+    onExportKMZ: () => alert('KMZ экспорт — будет реализован'),
+    onExportKML: () => alert('KML экспорт — будет реализован'),
+    onExportPNG: () => showPngPreviewModal((zone, zoom) => {
+      alert(`PNG экспорт: зона=${zone}, zoom=${zoom}`);
+    }),
+  });
 });
