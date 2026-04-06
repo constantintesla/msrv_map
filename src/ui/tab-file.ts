@@ -2,6 +2,9 @@ import { $ } from '../utils/dom';
 import { clearGrid } from '../core/grid-render';
 import { clearMarkers } from '../core/markers';
 import { clearZone } from '../core/zone';
+import { importFile } from '../export/kml-parser';
+import { renderAll } from '../core/grid-render';
+import { renderAllMarkers } from '../core/markers-render';
 
 export function initTabFile(): void {
   const container = $<HTMLDivElement>('#tab-file');
@@ -58,5 +61,18 @@ export function initTabFile(): void {
     }
   });
 
-  // Import and Project handlers will be wired in tasks 18 and 21
+  // Wire import
+  $<HTMLInputElement>('#input-import').addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    if (!confirm('Текущие данные будут заменены. Продолжить?')) return;
+    try {
+      await importFile(file);
+      renderAll();
+      renderAllMarkers();
+    } catch (err) {
+      alert('Ошибка импорта: ' + (err as Error).message);
+    }
+    (e.target as HTMLInputElement).value = '';
+  });
 }
