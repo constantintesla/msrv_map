@@ -29,16 +29,20 @@ class KMZGenerator {
         this.showPointLabels = true;
         this.labelFontFamily = 'Arial, sans-serif';
         this.squareLabelFontSize = 11;
+        this.squareLabelPosition = 'bottom-right';
         this.edgeLabelFontSize = 12;
         this.pointLabelFontSize = 12;
         this.gridShiftStepMeters = 10;
         this.currentMapType = 'satellite'; // Тип текущей карты
+        this.gridRebuildTimer = null;
+        this.viewportRefreshTimer = null;
         
         this.init();
     }
     
     init() {
         this.initMap();
+        this.initViewportListeners();
         this.initControls();
         this.initMarkerMode();
     }
@@ -58,6 +62,29 @@ class KMZGenerator {
         this.map.on('moveend', () => {
             this.currentBounds = this.map.getBounds();
         });
+    }
+
+    initViewportListeners() {
+        const refreshMapAfterViewportChange = () => {
+            if (this.viewportRefreshTimer) {
+                clearTimeout(this.viewportRefreshTimer);
+            }
+            this.viewportRefreshTimer = setTimeout(() => {
+                this.viewportRefreshTimer = null;
+                if (!this.map) return;
+                this.map.invalidateSize(true);
+                // После изменения масштаба страницы/размера окна переотрисовываем элементы сетки.
+                if (this.gridSquares && this.gridSquares.length > 0) {
+                    this.rebuildGridVisuals();
+                }
+            }, 120);
+        };
+
+        window.addEventListener('resize', refreshMapAfterViewportChange);
+        window.addEventListener('orientationchange', refreshMapAfterViewportChange);
+        if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+            window.visualViewport.addEventListener('resize', refreshMapAfterViewportChange);
+        }
     }
     
     loadMapType(type) {
@@ -139,19 +166,17 @@ class KMZGenerator {
         });
         
         // Размер сетки
-        document.getElementById('grid-size').addEventListener('change', (e) => {
-            this.gridSize = parseInt(e.target.value) || 100;
-            // Обновляем метку масштаба в квадрате A1 если сетка уже создана
+        const gridSizeInput = document.getElementById('grid-size');
+        const handleGridSizeChange = (e) => {
+            this.gridSize = Math.max(10, parseInt(e.target.value, 10) || 100);
+            e.target.value = this.gridSize;
+            // Если сетка уже создана — перестраиваем ее по текущей области.
             if (this.gridSquares.length > 0) {
-                const a1Square = this.gridSquares.find(s => s.name === 'A1');
-                if (a1Square && a1Square.label) {
-                    // Пересоздаем метку с новым текстом
-                    this.map.removeLayer(a1Square.label);
-                    a1Square.label = null;
-                    this.drawSquareLabel(a1Square);
-                }
+                this.scheduleGridRebuild(120);
             }
-        });
+        };
+        gridSizeInput.addEventListener('change', handleGridSizeChange);
+        gridSizeInput.addEventListener('input', handleGridSizeChange);
         
         // Выбор зоны для сетки
         document.getElementById('select-zone').addEventListener('click', () => {
@@ -184,15 +209,14 @@ class KMZGenerator {
         // Настройки сетки
         document.getElementById('grid-color').addEventListener('change', (e) => {
             this.gridColor = e.target.value;
-            // Если сетка уже создана, обновляем её
             if (this.gridSquares.length > 0) {
                 this.updateGridStyle();
             }
         });
         
         document.getElementById('grid-weight').addEventListener('change', (e) => {
-            this.gridWeight = parseInt(e.target.value);
-            // Если сетка уже создана, обновляем её
+            this.gridWeight = Math.max(1, parseInt(e.target.value, 10) || 2);
+            e.target.value = this.gridWeight;
             if (this.gridSquares.length > 0) {
                 this.updateGridStyle();
             }
@@ -254,6 +278,11 @@ class KMZGenerator {
             this.squareLabelFontSize = parseInt(e.target.value, 10) || 11;
             this.refreshLabelStyles();
         });
+
+        document.getElementById('square-label-position').addEventListener('change', (e) => {
+            this.squareLabelPosition = e.target.value || 'bottom-right';
+            this.refreshLabelStyles();
+        });
         
         document.getElementById('edge-font-size').addEventListener('change', (e) => {
             this.edgeLabelFontSize = parseInt(e.target.value, 10) || 12;
@@ -309,32 +338,20 @@ class KMZGenerator {
             this.exportPrintImage('png');
         });
         
-        // Экспорт KMZ
-        document.getElementById('export-kmz').addEventListener('click', () => {
-            this.exportKMZ();
-        });
-        
-        // Экспорт KML
-        document.getElementById('export-kml').addEventListener('click', () => {
-            this.exportKML();
-        });
+        // Единый экспорт KML + KMZ
+        const exportKmlKmzBtn = document.getElementById('export-kml-kmz');
+        if (exportKmlKmzBtn) {
+            exportKmlKmzBtn.addEventListener('click', () => {
+                this.exportKML();
+            });
+        }
         
         document.getElementById('export-hires-png').addEventListener('click', async () => {
             if (!this.gridBounds || this.gridSquares.length === 0) {
                 alert('Сначала создайте сетку, чтобы экспортировать PNG.');
                 return;
             }
-            this.showPrintPreview();
-            const isReady = await this.waitForPreviewReady(6000);
-            if (!isReady) {
-                alert('Предпросмотр не успел загрузиться. Попробуйте еще раз.');
-                return;
-            }
-            if (!this.printPreviewMap) {
-                alert('Не удалось подготовить карту предпросмотра.');
-                return;
-            }
-            this.exportPrintImage('png');
+            await this.exportHiResPngDirect();
         });
         
         // Импорт KMZ/KML
@@ -567,9 +584,9 @@ class KMZGenerator {
         document.getElementById('clear-zone').style.display = 'none';
     }
     
-    generateGrid() {
+    generateGrid(boundsOverride = null) {
         // Используем выбранную зону или видимую область карты
-        const bounds = this.selectedZone || this.map.getBounds();
+        const bounds = boundsOverride || this.selectedZone || this.map.getBounds();
         if (!bounds) {
             if (!this.selectedZone) {
                 alert('Пожалуйста, выберите зону для сетки или убедитесь, что карта загружена.');
@@ -1004,24 +1021,13 @@ class KMZGenerator {
     
     drawSquareLabel(square) {
         // Для квадрата A1 показываем масштаб (размер сетки в метрах) по центру в виде <100 м>
-        // Для остальных квадратов - название в правом нижнем углу
+        // Для остальных квадратов - название в выбранной пользователем позиции
         const isA1 = square.name === 'A1';
         const labelText = isA1 ? `&lt;${this.gridSize} м&gt;` : square.name;
         
         if (!square.label) {
             const bounds = square.bounds;
-            const se = bounds.getSouthEast();
-            
-            // Смещаем немного внутрь от угла (для всех кроме A1)
-            const sizeDegLat = this.gridSize / 111320;
-            const sizeDegLng = this.gridSize / (111320 * Math.cos(bounds.getCenter().lat * Math.PI / 180));
-            const offsetLat = sizeDegLat * 0.05; // 5% от размера квадрата
-            const offsetLng = sizeDegLng * 0.05;
-            
-            // Позиция метки: по центру квадрата для A1, в правом нижнем углу для остальных
-            const labelPos = isA1
-                ? square.center
-                : L.latLng(se.lat + offsetLat, se.lng - offsetLng);
+            const placement = this.getSquareLabelPlacement(bounds, isA1);
             
             const label = L.divIcon({
                 className: 'square-label-div',
@@ -1034,14 +1040,14 @@ class KMZGenerator {
                     pointer-events: none;
                     user-select: none;
                     white-space: nowrap;
-                    text-align: ${isA1 ? 'center' : 'right'};
+                    text-align: ${placement.textAlign};
                     font-family: ${this.labelFontFamily};
                 ">${labelText}</div>`,
-                iconSize: isA1 ? [80, 18] : [60, 16],
-                iconAnchor: isA1 ? [40, 9] : [60, 16] // A1 - центр, остальные - правый нижний угол
+                iconSize: placement.iconSize,
+                iconAnchor: placement.iconAnchor
             });
             
-            const marker = L.marker(labelPos, {
+            const marker = L.marker(placement.labelPos, {
                 icon: label,
                 interactive: false,
                 zIndexOffset: 1000
@@ -1076,6 +1082,60 @@ class KMZGenerator {
                 this.map.removeLayer(square.label);
             }
         }
+    }
+
+    getSquareLabelPlacement(bounds, isA1 = false) {
+        if (isA1) {
+            return {
+                labelPos: bounds.getCenter(),
+                textAlign: 'center',
+                iconSize: [80, 18],
+                iconAnchor: [40, 9]
+            };
+        }
+
+        const center = bounds.getCenter();
+        const nw = bounds.getNorthWest();
+        const ne = bounds.getNorthEast();
+        const se = bounds.getSouthEast();
+        const sw = bounds.getSouthWest();
+
+        const sizeDegLat = this.gridSize / 111320;
+        const sizeDegLng = this.gridSize / (111320 * Math.cos(center.lat * Math.PI / 180));
+        const offsetLat = sizeDegLat * 0.05;
+        const offsetLng = sizeDegLng * 0.05;
+
+        const positionMap = {
+            'top-left': L.latLng(nw.lat - offsetLat, nw.lng + offsetLng),
+            'top-center': L.latLng(nw.lat - offsetLat, center.lng),
+            'top-right': L.latLng(ne.lat - offsetLat, ne.lng - offsetLng),
+            'center-left': L.latLng(center.lat, nw.lng + offsetLng),
+            'center': center,
+            'center-right': L.latLng(center.lat, ne.lng - offsetLng),
+            'bottom-left': L.latLng(sw.lat + offsetLat, sw.lng + offsetLng),
+            'bottom-center': L.latLng(sw.lat + offsetLat, center.lng),
+            'bottom-right': L.latLng(se.lat + offsetLat, se.lng - offsetLng)
+        };
+
+        const alignMap = {
+            'top-left': 'left',
+            'top-center': 'center',
+            'top-right': 'right',
+            'center-left': 'left',
+            'center': 'center',
+            'center-right': 'right',
+            'bottom-left': 'left',
+            'bottom-center': 'center',
+            'bottom-right': 'right'
+        };
+
+        const selected = this.squareLabelPosition || 'bottom-right';
+        return {
+            labelPos: positionMap[selected] || positionMap['bottom-right'],
+            textAlign: alignMap[selected] || 'right',
+            iconSize: [80, 18],
+            iconAnchor: [40, 9]
+        };
     }
     
     updateGridDisplay() {
@@ -1113,6 +1173,16 @@ class KMZGenerator {
                     square.polygon.setStyle({
                         color: this.gridColor,
                         weight: this.gridWeight
+                    });
+                }
+                if (square.snailLines && square.snailLines.length > 0) {
+                    square.snailLines.forEach(line => {
+                        if (line && typeof line.setStyle === 'function') {
+                            line.setStyle({
+                                color: this.gridColor,
+                                weight: this.gridWeight
+                            });
+                        }
                     });
                 }
             });
@@ -1415,9 +1485,10 @@ class KMZGenerator {
             'checkpoint': '#28a745'
         };
         
+        const markerColor = iconColors[markerType] || iconColors.default;
         const icon = L.divIcon({
             className: 'custom-marker',
-            html: `<div style="background-color: ${iconColors[markerType]}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            html: `<div style="background-color: ${markerColor}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
             iconSize: [20, 20],
             iconAnchor: [10, 10]
         });
@@ -1432,6 +1503,7 @@ class KMZGenerator {
             id: Date.now(),
             latlng: latlng,
             type: markerType,
+            color: markerColor,
             name: markerName,
             description: description,
             marker: marker
@@ -1586,6 +1658,7 @@ class KMZGenerator {
                 markers: this.markers.map(m => ({
                     latlng: { lat: m.latlng.lat, lng: m.latlng.lng },
                     type: m.type,
+                    color: m.color || null,
                     name: m.name || '',
                     description: m.description
                 })),
@@ -1630,6 +1703,7 @@ class KMZGenerator {
                 showPointLabels: this.showPointLabels,
                 labelFontFamily: this.labelFontFamily,
                 squareLabelFontSize: this.squareLabelFontSize,
+                squareLabelPosition: this.squareLabelPosition,
                 edgeLabelFontSize: this.edgeLabelFontSize,
                 pointLabelFontSize: this.pointLabelFontSize,
                 gridShiftStepMeters: this.gridShiftStepMeters,
@@ -1719,12 +1793,14 @@ class KMZGenerator {
             this.showPointLabels = data.showPointLabels !== undefined ? data.showPointLabels : true;
             this.labelFontFamily = data.labelFontFamily || 'Arial, sans-serif';
             this.squareLabelFontSize = data.squareLabelFontSize || 11;
+            this.squareLabelPosition = data.squareLabelPosition || 'bottom-right';
             this.edgeLabelFontSize = data.edgeLabelFontSize || 12;
             this.pointLabelFontSize = data.pointLabelFontSize || 12;
             this.gridShiftStepMeters = data.gridShiftStepMeters || 10;
             document.getElementById('show-point-labels').checked = this.showPointLabels;
             document.getElementById('label-font-family').value = this.labelFontFamily;
             document.getElementById('square-font-size').value = this.squareLabelFontSize;
+            document.getElementById('square-label-position').value = this.squareLabelPosition;
             document.getElementById('edge-font-size').value = this.edgeLabelFontSize;
             document.getElementById('point-font-size').value = this.pointLabelFontSize;
             document.getElementById('grid-shift-step').value = this.gridShiftStepMeters;
@@ -1772,6 +1848,7 @@ class KMZGenerator {
                 this.showPointLabels = data.showPointLabels !== undefined ? data.showPointLabels : true;
                 this.labelFontFamily = data.labelFontFamily || 'Arial, sans-serif';
                 this.squareLabelFontSize = data.squareLabelFontSize || 11;
+                this.squareLabelPosition = data.squareLabelPosition || 'bottom-right';
                 this.edgeLabelFontSize = data.edgeLabelFontSize || 12;
                 this.pointLabelFontSize = data.pointLabelFontSize || 12;
                 
@@ -1787,6 +1864,7 @@ class KMZGenerator {
                 document.getElementById('show-point-labels').checked = this.showPointLabels;
                 document.getElementById('label-font-family').value = this.labelFontFamily;
                 document.getElementById('square-font-size').value = this.squareLabelFontSize;
+                document.getElementById('square-label-position').value = this.squareLabelPosition;
                 document.getElementById('edge-font-size').value = this.edgeLabelFontSize;
                 document.getElementById('point-font-size').value = this.pointLabelFontSize;
                 
@@ -1853,21 +1931,14 @@ class KMZGenerator {
             if (data.markers && data.markers.length > 0) {
                 data.markers.forEach(markerData => {
                     const latlng = L.latLng(markerData.latlng.lat, markerData.latlng.lng);
-                    // Используем временное значение для типа, потом обновим
-                    const tempType = markerData.type || 'default';
-                    document.getElementById('marker-type').value = tempType;
-                    document.getElementById('marker-description').value = markerData.description || '';
-                    
-                    this.addMarker(latlng);
-                    
-                    // Обновляем описание последней добавленной метки
-                    if (this.markers.length > 0) {
-                        const lastMarker = this.markers[this.markers.length - 1];
-                        lastMarker.description = markerData.description || '';
-                        lastMarker.type = markerData.type || 'default';
-                        lastMarker.name = markerData.name || '';
-                        this.updateMarkerPopup(lastMarker);
-                    }
+                    const restoredColor = this.resolveLegacyMarkerColor(markerData);
+                    this.addMarkerFromImport(
+                        latlng,
+                        markerData.type || 'default',
+                        markerData.description || '',
+                        markerData.name || '',
+                        restoredColor
+                    );
                 });
                 
                 // Очищаем временные поля
@@ -1906,63 +1977,103 @@ class KMZGenerator {
     }
     
     async exportKMZ() {
-        if (this.markers.length === 0 && this.gridSquares.length === 0) {
-            alert('Нет данных для экспорта. Добавьте метки или создайте сетку.');
-            return;
-        }
-        
-        try {
-            // Создаем KML контент
-            const kmlContent = this.generateKML();
-            
-            // Создаем KMZ файл (это ZIP архив с KML файлом)
-            const zip = new JSZip();
-            zip.file('doc.kml', kmlContent);
-            
-            // Генерируем и скачиваем файл
-            const blob = await zip.generateAsync({ type: 'blob' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `map_export_${new Date().getTime()}.kmz`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            alert('KMZ файл успешно создан!');
-        } catch (error) {
-            console.error('Ошибка при экспорте:', error);
-            alert('Ошибка при создании KMZ файла: ' + error.message);
-        }
+        // Оставляем совместимость старого вызова: теперь он делает общий экспорт.
+        return this.exportKML();
     }
     
-    exportKML() {
+    async exportKML() {
         if (this.markers.length === 0 && this.gridSquares.length === 0) {
             alert('Нет данных для экспорта. Добавьте метки или создайте сетку.');
             return;
         }
         
         try {
-            // Создаем KML контент
-            const kmlContent = this.generateKML();
+            const now = new Date().getTime();
+            const overlayBase64 = this.generateTransparentGridOverlayBase64();
+            const overlayDataUrl = overlayBase64 ? `data:image/png;base64,${overlayBase64}` : null;
+
+            if (this.gridSquares.length > 0) {
+                if (!overlayDataUrl || !overlayBase64) {
+                    throw new Error('Не удалось сформировать PNG-подложку сетки для экспорта.');
+                }
+            }
+
+            // KML: только PNG-подложка сетки + точки (без векторной сетки)
+            const kmlContent = this.generateKML({
+                embedGridOverlayPng: !!overlayDataUrl,
+                overlayHref: overlayDataUrl || null,
+                includeVectorGrid: false
+            });
             
             // Создаем Blob с KML контентом
-            const blob = new Blob([kmlContent], { type: 'application/vnd.google-earth.kml+xml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `map_export_${new Date().getTime()}.kml`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            const kmlBlob = new Blob([kmlContent], { type: 'application/vnd.google-earth.kml+xml' });
+            this.downloadBlob(kmlBlob, `map_export_${now}.kml`);
+
+            // KMZ: тот же состав, но PNG кладем в архив и ссылаемся локально
+            const hasKmzOverlay = !!overlayBase64;
+            const kmzKmlContent = this.generateKML({
+                embedGridOverlayPng: !!hasKmzOverlay,
+                overlayHref: hasKmzOverlay ? 'files/grid_overlay.png' : null,
+                includeVectorGrid: false
+            });
+            const zip = new JSZip();
+            zip.file('doc.kml', kmzKmlContent);
+            if (hasKmzOverlay) {
+                zip.file('files/grid_overlay.png', overlayBase64, { base64: true });
+            }
+            const kmzBlob = await zip.generateAsync({ type: 'blob' });
+            this.downloadBlob(kmzBlob, `map_export_${now}.kmz`);
             
-            alert('KML файл успешно создан!');
+            alert('Экспорт завершен: KML и KMZ файлы созданы.');
         } catch (error) {
             console.error('Ошибка при экспорте:', error);
-            alert('Ошибка при создании KML файла: ' + error.message);
+            alert('Ошибка при создании KML/KMZ файлов: ' + error.message);
         }
+    }
+
+    downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    parseDataUrlToBase64(dataUrl) {
+        const value = String(dataUrl || '');
+        const match = value.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) return null;
+        return {
+            mimeType: match[1],
+            base64: match[2]
+        };
+    }
+
+    resolveLegacyMarkerColor(markerData = {}) {
+        // Для старых проектов color мог отсутствовать: восстанавливаем из type/текста.
+        if (markerData.color) {
+            return markerData.color;
+        }
+
+        const normalizedType = (markerData.type || '').trim();
+        if (normalizedType) {
+            return this.getMarkerHexColor(normalizedType);
+        }
+
+        const inferredTypeFromName = this.inferMarkerTypeByText(markerData.name || '');
+        if (inferredTypeFromName) {
+            return this.getMarkerHexColor(inferredTypeFromName);
+        }
+
+        const inferredTypeFromDescription = this.inferMarkerTypeByText(markerData.description || '');
+        if (inferredTypeFromDescription) {
+            return this.getMarkerHexColor(inferredTypeFromDescription);
+        }
+
+        return this.getMarkerHexColor('default');
     }
     
     escapeKMLText(value) {
@@ -1988,6 +2099,11 @@ class KMZGenerator {
     getKMLStyles() {
         const gridColor = this.getKMLColorFromHex(this.gridColor);
         const gridWidth = this.getKMLLineWidth();
+        const markerDefaultColor = this.getKMLColorFromHex('#3388ff');
+        const markerWarningColor = this.getKMLColorFromHex('#ffc107');
+        const markerDangerColor = this.getKMLColorFromHex('#dc3545');
+        const markerInfoColor = this.getKMLColorFromHex('#17a2b8');
+        const markerCheckpointColor = this.getKMLColorFromHex('#28a745');
         
         return `
     <Style id="gridSquareStyle">
@@ -2034,6 +2150,7 @@ class KMZGenerator {
     <Style id="marker-default-style">
         <IconStyle>
             <scale>1.0</scale>
+            <color>${markerDefaultColor}</color>
             <Icon>
                 <href>${this.getKMLMarkerIconHref('default')}</href>
             </Icon>
@@ -2046,6 +2163,7 @@ class KMZGenerator {
     <Style id="marker-warning-style">
         <IconStyle>
             <scale>1.0</scale>
+            <color>${markerWarningColor}</color>
             <Icon>
                 <href>${this.getKMLMarkerIconHref('warning')}</href>
             </Icon>
@@ -2058,6 +2176,7 @@ class KMZGenerator {
     <Style id="marker-danger-style">
         <IconStyle>
             <scale>1.0</scale>
+            <color>${markerDangerColor}</color>
             <Icon>
                 <href>${this.getKMLMarkerIconHref('danger')}</href>
             </Icon>
@@ -2070,6 +2189,7 @@ class KMZGenerator {
     <Style id="marker-info-style">
         <IconStyle>
             <scale>1.0</scale>
+            <color>${markerInfoColor}</color>
             <Icon>
                 <href>${this.getKMLMarkerIconHref('info')}</href>
             </Icon>
@@ -2082,6 +2202,7 @@ class KMZGenerator {
     <Style id="marker-checkpoint-style">
         <IconStyle>
             <scale>1.0</scale>
+            <color>${markerCheckpointColor}</color>
             <Icon>
                 <href>${this.getKMLMarkerIconHref('checkpoint')}</href>
             </Icon>
@@ -2105,18 +2226,39 @@ class KMZGenerator {
         return latlngs.map(latlng => this.formatKMLCoordinate(latlng)).join(' ');
     }
     
-    createKMLPointPlacemark({ name = '', description = '', styleUrl = '', latlng }) {
+    createKMLPointPlacemark({ name = '', description = '', styleUrl = '', inlineStyle = '', latlng }) {
         const escapedName = this.escapeKMLText(name);
         const escapedDescription = this.escapeKMLText(description);
         const styleUrlLine = styleUrl ? `\n        <styleUrl>${styleUrl}</styleUrl>` : '';
+        const inlineStyleLine = inlineStyle ? `\n        ${inlineStyle}` : '';
         const descriptionLine = escapedDescription ? `\n        <description>${escapedDescription}</description>` : '';
         return `
     <Placemark>
-        <name>${escapedName}</name>${descriptionLine}${styleUrlLine}
+        <name>${escapedName}</name>${descriptionLine}${styleUrlLine}${inlineStyleLine}
         <Point>
             <coordinates>${this.formatKMLCoordinate(latlng)}</coordinates>
         </Point>
     </Placemark>`;
+    }
+
+    createKMLInlineMarkerStyle(markerData) {
+        const markerType = markerData?.type || 'default';
+        const iconHref = this.getKMLMarkerIconHref(markerType);
+        const hexColor = markerData?.color || this.getMarkerHexColor(markerType);
+        const kmlColor = this.getKMLColorFromHex(hexColor);
+        return `<Style>
+            <IconStyle>
+                <scale>1.0</scale>
+                <color>${kmlColor}</color>
+                <Icon>
+                    <href>${iconHref}</href>
+                </Icon>
+            </IconStyle>
+            <LabelStyle>
+                <color>FFFFFFFF</color>
+                <scale>0.8</scale>
+            </LabelStyle>
+        </Style>`;
     }
     
     createKMLLinePlacemark({ name = '', styleUrl = '', latlngs }) {
@@ -2154,6 +2296,26 @@ class KMZGenerator {
         </Polygon>
     </Placemark>`;
     }
+
+    createKMLGroundOverlay({ name = 'GridOverlay', href = '', bounds }) {
+        if (!href || !bounds) return '';
+        const escapedName = this.escapeKMLText(name);
+        return `
+    <GroundOverlay>
+        <name>${escapedName}</name>
+        <drawOrder>10</drawOrder>
+        <Icon>
+            <href>${href}</href>
+        </Icon>
+        <LatLonBox>
+            <north>${bounds.getNorth()}</north>
+            <south>${bounds.getSouth()}</south>
+            <east>${bounds.getEast()}</east>
+            <west>${bounds.getWest()}</west>
+            <rotation>0</rotation>
+        </LatLonBox>
+    </GroundOverlay>`;
+    }
     
     buildKMLMarkerDescription(markerData) {
         const parts = [];
@@ -2167,12 +2329,115 @@ class KMZGenerator {
         return parts.join('\n');
     }
     
-    generateKML() {
+    generateTransparentGridOverlayBase64() {
+        const effectiveGridBounds = this.getEffectiveGridBounds();
+        if (!effectiveGridBounds || !this.gridSquares || this.gridSquares.length === 0) {
+            return null;
+        }
+
+        const rows = [...new Set(this.gridSquares.map(square => square.row))].sort((a, b) => a - b);
+        const cols = [...new Set(this.gridSquares.map(square => square.col))].sort((a, b) => a - b);
+        if (rows.length === 0 || cols.length === 0) return null;
+
+        const cellBasePx = 180;
+        const minSide = 512;
+        const maxSide = 4096;
+        const rawWidth = Math.max(1, cols.length * cellBasePx);
+        const rawHeight = Math.max(1, rows.length * cellBasePx);
+        const scale = Math.min(maxSide / rawWidth, maxSide / rawHeight, 1);
+        const width = Math.max(minSide, Math.round(rawWidth * scale));
+        const height = Math.max(minSide, Math.round(rawHeight * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        ctx.clearRect(0, 0, width, height);
+        const north = effectiveGridBounds.getNorth();
+        const south = effectiveGridBounds.getSouth();
+        const west = effectiveGridBounds.getWest();
+        const east = effectiveGridBounds.getEast();
+        const latSpan = Math.max(1e-12, north - south);
+        const lngSpan = Math.max(1e-12, east - west);
+
+        const toX = (lng) => ((lng - west) / lngSpan) * width;
+        const toY = (lat) => ((north - lat) / latSpan) * height;
+
+        ctx.strokeStyle = this.gridColor;
+        ctx.lineWidth = Math.max(1, Math.min(8, Number(this.gridWeight) || 2));
+        ctx.globalAlpha = 1;
+
+        this.gridSquares.forEach(square => {
+            const b = square.bounds;
+            const x = toX(b.getWest());
+            const y = toY(b.getNorth());
+            const w = Math.max(1, toX(b.getEast()) - x);
+            const h = Math.max(1, toY(b.getSouth()) - y);
+            ctx.strokeRect(x, y, w, h);
+        });
+
+        // Крест в A2 для визуального соответствия.
+        const a2Square = this.gridSquares.find(square => square.name === 'A2');
+        if (a2Square) {
+            const b = a2Square.bounds;
+            const cx = toX(a2Square.center.lng);
+            const cy = toY(a2Square.center.lat);
+            ctx.beginPath();
+            ctx.moveTo(cx, toY(b.getNorth()));
+            ctx.lineTo(cx, toY(b.getSouth()));
+            ctx.moveTo(toX(b.getWest()), cy);
+            ctx.lineTo(toX(b.getEast()), cy);
+            ctx.stroke();
+        }
+
+        // Подписи квадратов.
+        if (this.showSquareNames) {
+            const fontPx = Math.max(10, Math.min(48, this.squareLabelFontSize * 2));
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `700 ${fontPx}px Arial, sans-serif`;
+            ctx.textBaseline = 'middle';
+
+            this.gridSquares.forEach(square => {
+                if (square.name === 'A2') return;
+                const isA1 = square.name === 'A1';
+                const text = isA1 ? `<${this.gridSize} м>` : square.name;
+                const placement = this.getSquareLabelPlacement(square.bounds, isA1);
+                let align = placement.textAlign;
+                if (align !== 'left' && align !== 'right' && align !== 'center') {
+                    align = 'right';
+                }
+                ctx.textAlign = align;
+                ctx.fillText(text, toX(placement.labelPos.lng), toY(placement.labelPos.lat));
+            });
+        }
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const commaIdx = dataUrl.indexOf(',');
+        if (commaIdx === -1) return null;
+        return dataUrl.slice(commaIdx + 1);
+    }
+
+    generateTransparentGridOverlayDataUrl() {
+        const base64 = this.generateTransparentGridOverlayBase64();
+        if (!base64) return null;
+        return `data:image/png;base64,${base64}`;
+    }
+
+    generateKML(options = {}) {
+        const {
+            embedGridOverlayPng = false,
+            includeVectorGrid = true,
+            overlayHref = null
+        } = options;
+
         const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>';
         const kmlHeader = '<kml xmlns="http://www.opengis.net/kml/2.2">';
         const documentStart = '<Document>';
         const styles = this.getKMLStyles();
         const placemarks = [];
+        const overlays = [];
         
         this.markers.forEach(markerData => {
             const markerName = this.showPointLabels
@@ -2181,12 +2446,24 @@ class KMZGenerator {
             placemarks.push(this.createKMLPointPlacemark({
                 name: markerName,
                 description: this.buildKMLMarkerDescription(markerData),
-                styleUrl: this.getKMLMarkerStyleId(markerData.type),
+                styleUrl: '',
+                inlineStyle: this.createKMLInlineMarkerStyle(markerData),
                 latlng: markerData.latlng
             }));
         });
         
-        if (this.gridSquares.length > 0) {
+        if (embedGridOverlayPng && this.gridSquares.length > 0 && this.gridBounds) {
+            const overlaySource = overlayHref || this.generateTransparentGridOverlayDataUrl();
+            if (overlaySource) {
+                overlays.push(this.createKMLGroundOverlay({
+                    name: 'Grid PNG Overlay',
+                    href: overlaySource,
+                    bounds: this.gridBounds
+                }));
+            }
+        }
+
+        if (includeVectorGrid && this.gridSquares.length > 0) {
             this.gridSquares.forEach(square => {
                 placemarks.push(this.createKMLPolygonPlacemark({
                     name: square.name,
@@ -2245,7 +2522,7 @@ class KMZGenerator {
             });
         }
         
-        if (this.gridBounds && this.gridSquares.length > 0) {
+        if (includeVectorGrid && this.gridBounds && this.gridSquares.length > 0) {
             const rows = [...new Set(this.gridSquares.map(square => square.row))].sort((a, b) => a - b);
             const cols = [...new Set(this.gridSquares.map(square => square.col))].sort((a, b) => a - b);
             const sizeDegLat = this.gridSize / 111320;
@@ -2314,6 +2591,7 @@ class KMZGenerator {
             kmlHeader,
             documentStart,
             styles,
+            overlays.join('\n'),
             placemarks.join('\n'),
             '</Document>',
             '</kml>'
@@ -2383,7 +2661,7 @@ class KMZGenerator {
             
             // Парсим Placemarks
             const placemarks = xmlDoc.querySelectorAll('Placemark');
-            const styleTypeMap = this.buildKMLStyleTypeMap(xmlDoc);
+            const styleVisualMap = this.buildKMLStyleVisualMap(xmlDoc);
             
             // Сначала собираем все квадраты сетки
             const gridSquaresMap = new Map();
@@ -2463,8 +2741,8 @@ class KMZGenerator {
                         }
                         
                         // Это настоящая метка
-                        const markerType = this.resolveMarkerTypeFromPlacemark(placemark, name, styleTypeMap);
-                        this.addMarkerFromImport(pointLatLng, markerType, description, name);
+                        const markerVisual = this.resolveMarkerVisualFromPlacemark(placemark, name, styleVisualMap);
+                        this.addMarkerFromImport(pointLatLng, markerVisual.type, description, name, markerVisual.color);
                     }
                 }
             });
@@ -2519,86 +2797,164 @@ class KMZGenerator {
         return colorMap[value] || null;
     }
 
-    buildKMLStyleTypeMap(xmlDoc) {
-        const styleTypeMap = new Map();
+    normalizeStyleUrl(styleUrl) {
+        const value = (styleUrl || '').trim();
+        if (!value) return '';
+        const hashIndex = value.lastIndexOf('#');
+        if (hashIndex >= 0) {
+            return value.slice(hashIndex);
+        }
+        return value.startsWith('#') ? value : `#${value}`;
+    }
 
-        xmlDoc.querySelectorAll('Style').forEach(styleNode => {
+    getMarkerHexColorFromText(text) {
+        const value = (text || '').toLowerCase();
+        if (!value) return null;
+        if (value.includes('red')) return '#dc3545';
+        if (value.includes('orange') || value.includes('ylw') || value.includes('yellow')) return '#ffc107';
+        if (value.includes('green') || value.includes('grn')) return '#28a745';
+        if (value.includes('purple') || value.includes('violet')) return '#17a2b8';
+        if (value.includes('blue') || value.includes('blu')) return '#3388ff';
+        return null;
+    }
+
+    buildKMLStyleVisualMap(xmlDoc) {
+        const styleVisualMap = new Map();
+
+        Array.from(xmlDoc.getElementsByTagName('*'))
+            .filter(node => node.localName === 'Style')
+            .forEach(styleNode => {
             const styleId = styleNode.getAttribute('id');
             if (!styleId) return;
 
             let styleType = null;
-            const iconHref = styleNode.querySelector('IconStyle Icon href')?.textContent || '';
+            let styleColor = null;
+            const iconHref = Array.from(styleNode.getElementsByTagName('*')).find(node => node.localName === 'href')?.textContent || '';
             if (iconHref) {
                 styleType = this.inferMarkerTypeByText(iconHref);
+                styleColor = styleColor || this.getMarkerHexColorFromText(iconHref);
             }
 
-            if (!styleType) {
-                const iconColor = styleNode.querySelector('IconStyle color')?.textContent || '';
-                styleType = this.inferMarkerTypeByColor(iconColor);
+            const iconColor = Array.from(styleNode.getElementsByTagName('*'))
+                .find(node => node.localName === 'IconStyle')
+                ?.getElementsByTagName('*');
+            const iconColorValue = iconColor
+                ? Array.from(iconColor).find(node => node.localName === 'color')?.textContent || ''
+                : '';
+            if (iconColorValue) {
+                styleColor = this.parseKMLColorToHex(iconColorValue) || styleColor;
+            }
+
+            if (!styleType && iconColorValue) {
+                styleType = this.inferMarkerTypeByColor(iconColorValue);
             }
 
             if (!styleType) {
                 styleType = this.inferMarkerTypeByText(styleId);
             }
 
-            if (styleType) {
-                styleTypeMap.set(styleId, styleType);
-                styleTypeMap.set(`#${styleId}`, styleType);
+            if (styleType || styleColor) {
+                const visual = {
+                    type: styleType || 'default',
+                    color: styleColor || null
+                };
+                styleVisualMap.set(styleId, visual);
+                styleVisualMap.set(`#${styleId}`, visual);
             }
         });
 
-        xmlDoc.querySelectorAll('StyleMap').forEach(styleMapNode => {
+        Array.from(xmlDoc.getElementsByTagName('*'))
+            .filter(node => node.localName === 'StyleMap')
+            .forEach(styleMapNode => {
             const styleMapId = styleMapNode.getAttribute('id');
             if (!styleMapId) return;
 
-            const pairs = styleMapNode.querySelectorAll('Pair');
+            const pairs = Array.from(styleMapNode.getElementsByTagName('*')).filter(node => node.localName === 'Pair');
             for (const pair of pairs) {
-                const key = (pair.querySelector('key')?.textContent || '').trim();
-                const styleUrl = (pair.querySelector('styleUrl')?.textContent || '').trim();
+                const key = (Array.from(pair.getElementsByTagName('*')).find(node => node.localName === 'key')?.textContent || '').trim();
+                const styleUrlRaw = (Array.from(pair.getElementsByTagName('*')).find(node => node.localName === 'styleUrl')?.textContent || '').trim();
+                const styleUrl = this.normalizeStyleUrl(styleUrlRaw);
                 if (key !== 'normal' || !styleUrl) continue;
 
-                const styleType = styleTypeMap.get(styleUrl) || styleTypeMap.get(styleUrl.replace(/^#/, ''));
-                if (styleType) {
-                    styleTypeMap.set(styleMapId, styleType);
-                    styleTypeMap.set(`#${styleMapId}`, styleType);
+                const styleVisual = styleVisualMap.get(styleUrl) || styleVisualMap.get(styleUrl.replace(/^#/, '')) || styleVisualMap.get(styleUrlRaw);
+                if (styleVisual) {
+                    styleVisualMap.set(styleMapId, styleVisual);
+                    styleVisualMap.set(`#${styleMapId}`, styleVisual);
                     break;
                 }
             }
         });
 
-        return styleTypeMap;
+        return styleVisualMap;
     }
 
-    resolveMarkerTypeFromPlacemark(placemark, markerName, styleTypeMap) {
-        const styleUrl = (placemark.querySelector('styleUrl')?.textContent || '').trim();
+    resolveMarkerVisualFromPlacemark(placemark, markerName, styleVisualMap) {
+        const fallbackType = this.inferMarkerTypeByText(markerName) || 'default';
+        const fallbackColor = this.getMarkerHexColor(fallbackType);
+        const styleUrlRaw = (Array.from(placemark.getElementsByTagName('*')).find(node => node.localName === 'styleUrl')?.textContent || '').trim();
+        const styleUrl = this.normalizeStyleUrl(styleUrlRaw);
         if (styleUrl) {
-            const styleByUrl = styleTypeMap.get(styleUrl) || styleTypeMap.get(styleUrl.replace(/^#/, ''));
+            const styleByUrl = styleVisualMap.get(styleUrl) || styleVisualMap.get(styleUrl.replace(/^#/, '')) || styleVisualMap.get(styleUrlRaw);
             if (styleByUrl) {
-                return styleByUrl;
+                return {
+                    type: styleByUrl.type || fallbackType,
+                    color: styleByUrl.color || this.getMarkerHexColor(styleByUrl.type || fallbackType)
+                };
             }
         }
 
-        const inlineIconHref = placemark.querySelector('Style IconStyle Icon href')?.textContent || '';
+        const inlineIconHref = Array.from(placemark.getElementsByTagName('*')).find(node => node.localName === 'href')?.textContent || '';
+        let inlineType = null;
+        let inlineHrefColor = null;
         if (inlineIconHref) {
-            const typeByInlineHref = this.inferMarkerTypeByText(inlineIconHref);
-            if (typeByInlineHref) {
-                return typeByInlineHref;
-            }
+            inlineType = this.inferMarkerTypeByText(inlineIconHref);
+            inlineHrefColor = this.getMarkerHexColorFromText(inlineIconHref);
         }
 
-        const inlineColor = placemark.querySelector('Style IconStyle color')?.textContent || '';
-        const inlineColorType = this.inferMarkerTypeByColor(inlineColor);
-        if (inlineColorType) {
-            return inlineColorType;
+        const inlineColor = Array.from(placemark.getElementsByTagName('*'))
+            .find(node => node.localName === 'IconStyle')
+            ?.getElementsByTagName('*');
+        const inlineColorValue = inlineColor
+            ? Array.from(inlineColor).find(node => node.localName === 'color')?.textContent || ''
+            : '';
+        const inlineColorHex = this.parseKMLColorToHex(inlineColorValue);
+        if (inlineColorHex) {
+            return {
+                type: inlineType || this.inferMarkerTypeByColor(inlineColorValue) || fallbackType,
+                color: inlineColorHex
+            };
         }
 
-        return this.inferMarkerTypeByText(markerName) || 'default';
+        if (inlineType) {
+            return {
+                type: inlineType,
+                color: inlineHrefColor || this.getMarkerHexColor(inlineType)
+            };
+        }
+
+        return {
+            type: fallbackType,
+            color: fallbackColor
+        };
     }
 
-    addMarkerFromImport(latlng, type, description, name = '') {
-        const markerName = (name || '').trim();
-        const markerDescription = (description || '').trim();
+    parseKMLColorToHex(colorValue) {
+        const value = (colorValue || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+        if (value.length === 6) {
+            return `#${value}`;
+        }
+        if (value.length !== 8) {
+            return null;
+        }
 
+        // KML стандарт: AABBGGRR.
+        const bb = value.slice(2, 4);
+        const gg = value.slice(4, 6);
+        const rr = value.slice(6, 8);
+        return `#${rr}${gg}${bb}`;
+    }
+
+    getMarkerHexColor(type) {
         const iconColors = {
             'default': '#3388ff',
             'warning': '#ffc107',
@@ -2606,11 +2962,18 @@ class KMZGenerator {
             'info': '#17a2b8',
             'checkpoint': '#28a745'
         };
+        return iconColors[type] || iconColors.default;
+    }
+
+    addMarkerFromImport(latlng, type, description, name = '', importedColor = null) {
+        const markerName = (name || '').trim();
+        const markerDescription = (description || '').trim();
+        const markerColor = importedColor || this.getMarkerHexColor(type);
         
         const icon = L.divIcon({
             className: 'custom-marker',
             html: `<div style="
-                background-color: ${iconColors[type]};
+                background-color: ${markerColor};
                 width: 24px;
                 height: 24px;
                 border-radius: 50%;
@@ -2631,6 +2994,7 @@ class KMZGenerator {
             id: Date.now() + Math.random(),
             latlng: latlng,
             type: type,
+            color: markerColor,
             name: markerName,
             description: markerDescription,
             marker: marker
@@ -2693,6 +3057,7 @@ class KMZGenerator {
                 this.gridSquares = [];
             }
             this.gridSquares.push(square);
+            this.gridBounds = this.computeGridBoundsFromSquares(this.gridSquares) || this.gridBounds;
             
             // Добавляем метку для квадрата
             this.drawSquareLabel(square);
@@ -2790,14 +3155,40 @@ class KMZGenerator {
     }
     
     getBufferedGridBounds(bufferMeters = 30) {
-        if (!this.gridBounds) return null;
-        const centerLat = this.gridBounds.getCenter().lat;
+        const effectiveGridBounds = this.getEffectiveGridBounds();
+        if (!effectiveGridBounds) return null;
+        const centerLat = effectiveGridBounds.getCenter().lat;
         const deltaLat = bufferMeters / 111320;
         const deltaLng = bufferMeters / (111320 * Math.cos(centerLat * Math.PI / 180));
         return L.latLngBounds(
-            [this.gridBounds.getSouth() - deltaLat, this.gridBounds.getWest() - deltaLng],
-            [this.gridBounds.getNorth() + deltaLat, this.gridBounds.getEast() + deltaLng]
+            [effectiveGridBounds.getSouth() - deltaLat, effectiveGridBounds.getWest() - deltaLng],
+            [effectiveGridBounds.getNorth() + deltaLat, effectiveGridBounds.getEast() + deltaLng]
         );
+    }
+
+    getEffectiveGridBounds() {
+        if (this.gridSquares && this.gridSquares.length > 0) {
+            const recomputed = this.computeGridBoundsFromSquares(this.gridSquares);
+            if (recomputed) {
+                // Синхронизируем состояние, чтобы дальше не жить со stale-границами.
+                this.gridBounds = recomputed;
+                return recomputed;
+            }
+        }
+        return this.gridBounds || null;
+    }
+
+    computeGridBoundsFromSquares(squares) {
+        if (!squares || squares.length === 0) return null;
+        const bounds = L.latLngBounds([]);
+        let hasAny = false;
+        squares.forEach(square => {
+            if (!square || !square.bounds) return;
+            bounds.extend(square.bounds.getSouthWest());
+            bounds.extend(square.bounds.getNorthEast());
+            hasAny = true;
+        });
+        return hasAny ? bounds : null;
     }
     
     getMarkerBounds() {
@@ -2826,7 +3217,7 @@ class KMZGenerator {
     }
     
     getPngExportBounds() {
-        const baseBounds = this.getBufferedGridBounds(30) || this.getPreviewBounds();
+        const baseBounds = this.getBufferedGridBounds(0.5) || this.getPreviewBounds();
         if (!baseBounds) return null;
         
         const exportBounds = L.latLngBounds(
@@ -2836,11 +3227,39 @@ class KMZGenerator {
         
         const markerBounds = this.getMarkerBounds();
         if (markerBounds) {
-            exportBounds.extend(markerBounds.getSouthWest());
-            exportBounds.extend(markerBounds.getNorthEast());
+            // Расширяем кадр под точки, но не даем "улететь" слишком далеко от сетки.
+            // Иначе сетка становится слишком мелкой и кажется, что ее нет.
+            const combined = L.latLngBounds(
+                [exportBounds.getSouth(), exportBounds.getWest()],
+                [exportBounds.getNorth(), exportBounds.getEast()]
+            );
+            combined.extend(markerBounds.getSouthWest());
+            combined.extend(markerBounds.getNorthEast());
+            return this.clampBoundsExpansion(exportBounds, combined, 0.0);
         }
         
         return exportBounds;
+    }
+
+    clampBoundsExpansion(baseBounds, targetBounds, maxExpansionRatio = 0.35) {
+        if (!baseBounds || !targetBounds) return targetBounds || baseBounds || null;
+
+        const baseNorth = baseBounds.getNorth();
+        const baseSouth = baseBounds.getSouth();
+        const baseWest = baseBounds.getWest();
+        const baseEast = baseBounds.getEast();
+
+        const baseLatSpan = Math.max(1e-12, baseNorth - baseSouth);
+        const baseLngSpan = Math.max(1e-12, baseEast - baseWest);
+        const maxLatExpand = baseLatSpan * Math.max(0, maxExpansionRatio);
+        const maxLngExpand = baseLngSpan * Math.max(0, maxExpansionRatio);
+
+        const north = Math.min(targetBounds.getNorth(), baseNorth + maxLatExpand);
+        const south = Math.max(targetBounds.getSouth(), baseSouth - maxLatExpand);
+        const east = Math.min(targetBounds.getEast(), baseEast + maxLngExpand);
+        const west = Math.max(targetBounds.getWest(), baseWest - maxLngExpand);
+
+        return L.latLngBounds([south, west], [north, east]);
     }
     
     getPngExportSize(bounds) {
@@ -2880,7 +3299,7 @@ class KMZGenerator {
         if (selectedMode === 'selected-zone' && this.selectedZone) return this.selectedZone;
         if (selectedMode === 'current-view') return this.map.getBounds();
         
-        return this.gridBounds || this.selectedZone || this.map.getBounds();
+        return this.getEffectiveGridBounds() || this.selectedZone || this.map.getBounds();
     }
     
     waitForPreviewReady(timeoutMs = 6000) {
@@ -2947,6 +3366,296 @@ class KMZGenerator {
         await this.waitForTilesLoaded(this.printPreviewMap, 5000);
         await new Promise(resolve => setTimeout(resolve, 120));
     }
+
+    createTileLayerByType(type) {
+        if (type === 'satellite') {
+            return L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri',
+                maxZoom: 19,
+                minZoom: 1
+            });
+        }
+        if (type === 'topographic') {
+            return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+                minZoom: 1
+            });
+        }
+        return L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors, OpenTopoMap',
+            maxZoom: 17,
+            minZoom: 1
+        });
+    }
+
+    async exportHiResPngDirect() {
+        const exportBounds = this.getPngExportBounds();
+        if (!exportBounds) {
+            alert('Нет данных для экспорта PNG.');
+            return;
+        }
+
+        const pngSize = this.getPngExportSize(exportBounds);
+        const widthPx = pngSize.widthPx;
+        const heightPx = pngSize.heightPx;
+        const btn = document.getElementById('export-hires-png');
+        const oldText = btn ? btn.textContent : '';
+
+        let tempMap = null;
+        let tempContainer = null;
+        try {
+            if (btn) {
+                btn.textContent = 'Создание PNG...';
+                btn.disabled = true;
+            }
+
+            tempContainer = document.createElement('div');
+            tempContainer.style.position = 'fixed';
+            tempContainer.style.left = '0';
+            tempContainer.style.top = '0';
+            tempContainer.style.width = `${widthPx}px`;
+            tempContainer.style.height = `${heightPx}px`;
+            tempContainer.style.background = '#ffffff';
+            tempContainer.style.pointerEvents = 'none';
+            tempContainer.style.zIndex = '-1';
+            document.body.appendChild(tempContainer);
+
+            tempMap = L.map(tempContainer, {
+                zoomControl: false,
+                attributionControl: false,
+                dragging: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                boxZoom: false,
+                keyboard: false,
+                zoomAnimation: false,
+                fadeAnimation: false,
+                markerZoomAnimation: false
+            });
+            const tempGridRenderer = L.canvas({ padding: 0.5 });
+
+            this.createTileLayerByType(this.currentMapType).addTo(tempMap);
+            tempMap.invalidateSize(true);
+            const maxZoomByMapType = this.currentMapType === 'elevation' ? 17 : 19;
+            const currentMainZoom = this.map ? this.map.getZoom() : maxZoomByMapType;
+            const safeMaxZoom = Math.min(maxZoomByMapType, Math.max(1, currentMainZoom));
+            tempMap.fitBounds(exportBounds, { padding: [0, 0], maxZoom: safeMaxZoom });
+            await this.waitForMapMoveEnd(tempMap, 4000);
+            await this.waitForTilesLoaded(tempMap, 7000);
+
+            // Сетка
+            if (this.gridSquares && this.gridSquares.length > 0) {
+                this.gridSquares.forEach(square => {
+                    if (!square.bounds) return;
+                    L.polygon([
+                        square.bounds.getNorthWest(),
+                        square.bounds.getNorthEast(),
+                        square.bounds.getSouthEast(),
+                        square.bounds.getSouthWest()
+                    ], {
+                        color: this.gridColor,
+                        weight: this.gridWeight,
+                        fill: false,
+                        interactive: false,
+                        renderer: tempGridRenderer
+                    }).addTo(tempMap);
+                });
+            }
+
+            // Подписи квадратов
+            if (this.gridSquares && this.gridSquares.length > 0 && this.showSquareNames) {
+                this.gridSquares.forEach(square => {
+                    if (!square.bounds || square.name === 'A2') return;
+                    const isA1 = square.name === 'A1';
+                    const labelText = isA1 ? `&lt;${this.gridSize} м&gt;` : square.name;
+                    const placement = this.getSquareLabelPlacement(square.bounds, isA1);
+                    const labelIcon = L.divIcon({
+                        className: 'square-label-div',
+                        html: `<div style="
+                            background: transparent;
+                            padding: 0;
+                            font-size: ${this.squareLabelFontSize}px;
+                            font-weight: bold;
+                            color: white;
+                            pointer-events: none;
+                            user-select: none;
+                            white-space: nowrap;
+                            text-align: ${placement.textAlign};
+                            font-family: ${this.labelFontFamily};
+                        ">${labelText}</div>`,
+                        iconSize: placement.iconSize,
+                        iconAnchor: placement.iconAnchor
+                    });
+                    L.marker(placement.labelPos, { icon: labelIcon, interactive: false }).addTo(tempMap);
+                });
+            }
+
+            // Краевые подписи
+            if (this.gridBounds && this.gridSquares && this.gridSquares.length > 0) {
+                const rows = [...new Set(this.gridSquares.map(s => s.row))].sort((a, b) => a - b);
+                const cols = [...new Set(this.gridSquares.map(s => s.col))].sort((a, b) => a - b);
+                if (rows.length > 0 && cols.length > 0) {
+                    const sizeDegLat = this.gridSize / 111320;
+                    const centerLat = this.gridBounds.getCenter().lat;
+                    const sizeDegLng = this.gridSize / (111320 * Math.cos(centerLat * Math.PI / 180));
+                    const offsetLat = sizeDegLat * 0.08;
+                    const offsetLng = sizeDegLng * 0.08;
+
+                    const createEdgeLabel = (text, className, fontSize) => L.divIcon({
+                        className,
+                        html: `<div style="
+                            background: transparent;
+                            padding: 0;
+                            font-size: ${fontSize}px;
+                            font-weight: bold;
+                            color: white;
+                            pointer-events: none;
+                            user-select: none;
+                            text-align: center;
+                            white-space: nowrap;
+                            font-family: ${this.labelFontFamily};
+                        ">${text}</div>`,
+                        iconSize: [20, 16],
+                        iconAnchor: [10, 8]
+                    });
+
+                    if (this.showEdgeLeft) {
+                        rows.forEach(row => {
+                            const square = this.gridSquares.find(s => s.row === row && s.col === cols[0]);
+                            if (!square) return;
+                            const normalizedRow = row >= 0 ? row : 26 + (row % 26);
+                            const letter = String.fromCharCode(65 + (normalizedRow % 26));
+                            L.marker([square.center.lat, this.gridBounds.getWest() - offsetLng], {
+                                icon: createEdgeLabel(letter, 'edge-label-left', this.edgeLabelFontSize),
+                                interactive: false
+                            }).addTo(tempMap);
+                        });
+                    }
+                    if (this.showEdgeRight) {
+                        rows.forEach(row => {
+                            const square = this.gridSquares.find(s => s.row === row && s.col === cols[cols.length - 1]);
+                            if (!square) return;
+                            const normalizedRow = row >= 0 ? row : 26 + (row % 26);
+                            const letter = String.fromCharCode(65 + (normalizedRow % 26));
+                            L.marker([square.center.lat, this.gridBounds.getEast() + offsetLng], {
+                                icon: createEdgeLabel(letter, 'edge-label-right', this.edgeLabelFontSize),
+                                interactive: false
+                            }).addTo(tempMap);
+                        });
+                    }
+                    if (this.showEdgeTop) {
+                        cols.forEach(col => {
+                            const square = this.gridSquares.find(s => s.col === col && s.row === rows[0]);
+                            if (!square) return;
+                            const number = (col >= 0 ? col : Math.abs(col)) + 1;
+                            L.marker([this.gridBounds.getNorth() + offsetLat, square.center.lng], {
+                                icon: createEdgeLabel(String(number), 'edge-label-top', this.edgeLabelFontSize),
+                                interactive: false
+                            }).addTo(tempMap);
+                        });
+                    }
+                    if (this.showEdgeBottom) {
+                        cols.forEach(col => {
+                            const square = this.gridSquares.find(s => s.col === col && s.row === rows[rows.length - 1]);
+                            if (!square) return;
+                            const number = (col >= 0 ? col : Math.abs(col)) + 1;
+                            L.marker([this.gridBounds.getSouth() - offsetLat, square.center.lng], {
+                                icon: createEdgeLabel(String(number), 'edge-label-bottom', this.edgeLabelFontSize),
+                                interactive: false
+                            }).addTo(tempMap);
+                        });
+                    }
+                }
+            }
+
+            // Точки
+            if (this.markers && this.markers.length > 0) {
+                this.markers.forEach(m => {
+                    if (!m || !m.latlng) return;
+                    const markerColor = m.color || this.getMarkerHexColor(m.type || 'default');
+                    const icon = L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div style="background-color: ${markerColor}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    });
+                    const marker = L.marker(m.latlng, { icon, interactive: false }).addTo(tempMap);
+                    if (this.showPointLabels && m.name) {
+                        marker.bindTooltip(
+                            `<span style="font-size:${this.pointLabelFontSize}px;font-weight:600;font-family:${this.labelFontFamily};color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;">${this.escapeHtml(m.name)}</span>`,
+                            {
+                                permanent: true,
+                                direction: 'top',
+                                offset: [0, -12],
+                                className: 'marker-name-tooltip',
+                                interactive: false
+                            }
+                        );
+                    }
+                });
+            }
+
+            await this.waitForTilesLoaded(tempMap, 8000);
+            await new Promise(resolve => setTimeout(resolve, 320));
+
+            const canvas = await html2canvas(tempContainer, {
+                scale: 1,
+                useCORS: true,
+                logging: false,
+                width: widthPx,
+                height: heightPx,
+                backgroundColor: '#ffffff',
+                windowWidth: widthPx,
+                windowHeight: heightPx
+            });
+
+            // Жестко кадрируем по целевым географическим границам, чтобы убрать лишнюю карту.
+            const nwPoint = tempMap.latLngToContainerPoint(exportBounds.getNorthWest());
+            const sePoint = tempMap.latLngToContainerPoint(exportBounds.getSouthEast());
+            const cropPadPx = 35; // запас, чтобы краевые подписи и линии не срезались
+            const rawX = Math.floor(Math.min(nwPoint.x, sePoint.x)) - cropPadPx;
+            const rawY = Math.floor(Math.min(nwPoint.y, sePoint.y)) - cropPadPx;
+            const rawW = Math.ceil(Math.abs(sePoint.x - nwPoint.x)) + cropPadPx * 2;
+            const rawH = Math.ceil(Math.abs(sePoint.y - nwPoint.y)) + cropPadPx * 2;
+            const cropX = Math.max(0, rawX);
+            const cropY = Math.max(0, rawY);
+            const cropW = Math.max(1, rawW);
+            const cropH = Math.max(1, rawH);
+            const maxW = Math.max(1, canvas.width - cropX);
+            const maxH = Math.max(1, canvas.height - cropY);
+            const finalW = Math.min(cropW, maxW);
+            const finalH = Math.min(cropH, maxH);
+
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width = finalW;
+            outCanvas.height = finalH;
+            const outCtx = outCanvas.getContext('2d');
+            outCtx.drawImage(canvas, cropX, cropY, finalW, finalH, 0, 0, finalW, finalH);
+
+            const a = document.createElement('a');
+            a.href = outCanvas.toDataURL('image/png');
+            a.download = `map_hires_${finalW}x${finalH}_${new Date().getTime()}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            alert('PNG экспортирован без предпросмотра.');
+        } catch (error) {
+            console.error('Ошибка прямого PNG экспорта:', error);
+            alert('Ошибка при экспорте PNG: ' + error.message);
+        } finally {
+            if (tempMap) {
+                tempMap.remove();
+            }
+            if (tempContainer && tempContainer.parentNode) {
+                tempContainer.parentNode.removeChild(tempContainer);
+            }
+            if (btn) {
+                btn.textContent = oldText;
+                btn.disabled = false;
+            }
+        }
+    }
     
     shiftGrid(direction) {
         if (!this.gridSquares || this.gridSquares.length === 0 || !this.gridBounds) {
@@ -2999,6 +3708,26 @@ class KMZGenerator {
         }
         
         this.rebuildGridVisuals();
+    }
+
+    scheduleGridRebuild(delayMs = 120) {
+        if (!this.gridSquares || this.gridSquares.length === 0 || !this.gridBounds) return;
+        if (this.gridRebuildTimer) {
+            clearTimeout(this.gridRebuildTimer);
+        }
+        this.gridRebuildTimer = setTimeout(() => {
+            this.gridRebuildTimer = null;
+            this.rebuildGridByCurrentExtent();
+        }, Math.max(0, delayMs));
+    }
+
+    rebuildGridByCurrentExtent() {
+        if (!this.gridBounds) return;
+        const bounds = L.latLngBounds(
+            [this.gridBounds.getSouth(), this.gridBounds.getWest()],
+            [this.gridBounds.getNorth(), this.gridBounds.getEast()]
+        );
+        this.generateGrid(bounds);
     }
     
     rebuildGridVisuals() {
@@ -3274,16 +4003,7 @@ class KMZGenerator {
                                         const isA1 = square.name === 'A1';
                                         const labelText = isA1 ? `<${this.gridSize} м>` : square.name;
                                         
-                                        // Совпадающая логика позиции с основной картой
-                                        const se = bounds.getSouthEast();
-                                        const sizeDegLat = this.gridSize / 111320;
-                                        const sizeDegLng = this.gridSize / (111320 * Math.cos(bounds.getCenter().lat * Math.PI / 180));
-                                        const offsetLat = sizeDegLat * 0.05;
-                                        const offsetLng = sizeDegLng * 0.05;
-                                        
-                                        const labelPos = isA1
-                                            ? square.center
-                                            : L.latLng(se.lat + offsetLat, se.lng - offsetLng);
+                                        const placement = this.getSquareLabelPlacement(bounds, isA1);
                                         
                                         const labelIcon = L.divIcon({
                                             className: 'square-label-div',
@@ -3296,13 +4016,13 @@ class KMZGenerator {
                                                 pointer-events: none;
                                                 user-select: none;
                                                 white-space: nowrap;
-                                                text-align: ${isA1 ? 'center' : 'right'};
+                                                text-align: ${placement.textAlign};
                                                 font-family: ${this.labelFontFamily};
                                             ">${labelText}</div>`,
-                                            iconSize: isA1 ? [80, 18] : [60, 16],
-                                            iconAnchor: isA1 ? [40, 9] : [60, 16]
+                                            iconSize: placement.iconSize,
+                                            iconAnchor: placement.iconAnchor
                                         });
-                                        const label = L.marker(labelPos, {
+                                        const label = L.marker(placement.labelPos, {
                                             icon: labelIcon,
                                             interactive: false
                                         });

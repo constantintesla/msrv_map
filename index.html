@@ -120,6 +120,18 @@
                         </select>
                         <label for="square-font-size">Шрифт квадратов (px):</label>
                         <input type="number" id="square-font-size" value="11" min="8" max="48" step="1">
+                        <label for="square-label-position">Положение названия квадрата:</label>
+                        <select id="square-label-position">
+                            <option value="top-left">Слева сверху</option>
+                            <option value="top-center">Сверху по центру</option>
+                            <option value="top-right">Справа сверху</option>
+                            <option value="center-left">Слева по центру</option>
+                            <option value="center">По центру</option>
+                            <option value="center-right">Справа по центру</option>
+                            <option value="bottom-left">Слева снизу</option>
+                            <option value="bottom-center">Снизу по центру</option>
+                            <option value="bottom-right" selected>Справа снизу</option>
+                        </select>
                         <label for="edge-font-size">Шрифт краевых меток (px):</label>
                         <input type="number" id="edge-font-size" value="12" min="8" max="48" step="1">
                         <label for="point-font-size">Шрифт подписей точек (px):</label>
@@ -167,8 +179,7 @@
                     <div class="control-group">
                         <button id="print-preview" class="btn btn-primary">Предпросмотр печати</button>
                         <div style="margin-top: 10px;">
-                            <button id="export-kmz" class="btn btn-success">Экспортировать KMZ</button>
-                            <button id="export-kml" class="btn btn-success" style="margin-top: 5px;">Экспортировать KML</button>
+                            <button id="export-kml-kmz" class="btn btn-success">Экспортировать KML + KMZ</button>
                             <button id="export-hires-png" class="btn btn-success" style="margin-top: 5px;">Экспортировать PNG (сетка и точки)</button>
                         </div>
                         <div style="margin-top: 10px;">
@@ -244,7 +255,7 @@
     <!-- jsPDF for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
-    <script src="app.js?v=56"></script>
+    <script src="app.js?v=84"></script>
 </body>
 </html>
 
