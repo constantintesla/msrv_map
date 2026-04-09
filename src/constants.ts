@@ -76,6 +76,9 @@ export const DEFAULT_FONT_FAMILY = 'Arial, sans-serif';
 export const DEFAULT_SQUARE_FONT_SIZE = 11;
 export const DEFAULT_EDGE_FONT_SIZE = 12;
 export const DEFAULT_POINT_FONT_SIZE = 12;
+export const DEFAULT_LABEL_COLOR = '#ffffff';
+export const DEFAULT_LABEL_STROKE = true;
+export const DEFAULT_LABEL_STROKE_COLOR = '#000000';
 
 // === PNG Export ===
 

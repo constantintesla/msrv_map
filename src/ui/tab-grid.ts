@@ -86,6 +86,18 @@ export function initTabGrid(): void {
           <input type="number" class="input input--sm" id="input-edge-font" value="${state.get('edgeFontSize')}" min="8" max="48">
         </div>
         <div class="field">
+          <label class="label">Цвет подписей</label>
+          <input type="color" class="input" id="input-label-color" value="${state.get('labelColor')}" style="height:32px;padding:2px;">
+        </div>
+        <label class="checkbox">
+          <input type="checkbox" id="chk-label-stroke" ${state.get('labelStroke') ? 'checked' : ''}>
+          Обводка подписей
+        </label>
+        <div class="field" id="field-stroke-options" style="${state.get('labelStroke') ? 'margin-top:0.3rem;' : 'display:none;margin-top:0.3rem;'}">
+          <label class="label">Цвет обводки</label>
+          <input type="color" class="input" id="input-stroke-color" value="${state.get('labelStrokeColor')}" style="height:32px;padding:2px;">
+        </div>
+        <div class="field">
           <label class="checkbox">
             <input type="checkbox" id="chk-show-names" ${state.get('showSquareNames') ? 'checked' : ''}>
             Названия квадратов
@@ -142,11 +154,11 @@ export function initTabGrid(): void {
   $<HTMLButtonElement>('#btn-refresh-grid').addEventListener('click', refreshGrid);
 
   // Style changes
-  const styleInputs = ['#input-grid-color', '#input-grid-weight', '#select-font-family',
-    '#input-sq-font', '#input-edge-font', '#chk-show-names', '#select-name-pos',
-    '#chk-edge-left', '#chk-edge-right', '#chk-edge-top', '#chk-edge-bottom'];
 
-  function syncStyleState() {
+  function syncAllState() {
+    const labelStroke = $<HTMLInputElement>('#chk-label-stroke').checked;
+    $<HTMLDivElement>('#field-stroke-options').style.display = labelStroke ? '' : 'none';
+
     state.patch({
       gridColor: $<HTMLInputElement>('#input-grid-color').value,
       gridWeight: parseInt($<HTMLInputElement>('#input-grid-weight').value) || 2,
@@ -155,6 +167,9 @@ export function initTabGrid(): void {
       edgeFontSize: parseInt($<HTMLInputElement>('#input-edge-font').value) || 12,
       showSquareNames: $<HTMLInputElement>('#chk-show-names').checked,
       squareNamePosition: $<HTMLSelectElement>('#select-name-pos').value as any,
+      labelColor: $<HTMLInputElement>('#input-label-color').value,
+      labelStroke,
+      labelStrokeColor: $<HTMLInputElement>('#input-stroke-color').value,
       showEdgeLabels: {
         left: $<HTMLInputElement>('#chk-edge-left').checked,
         right: $<HTMLInputElement>('#chk-edge-right').checked,
@@ -165,10 +180,9 @@ export function initTabGrid(): void {
     bus.emit('grid:style-changed');
   }
 
-  styleInputs.forEach(sel => {
-    const el = container.querySelector(sel);
-    if (el) el.addEventListener('change', syncStyleState);
-  });
+  // Listen on both 'change' and 'input' for all style controls
+  container.addEventListener('change', syncAllState);
+  container.addEventListener('input', syncAllState);
 
   // Zone events
   bus.on('zone:selected', () => {

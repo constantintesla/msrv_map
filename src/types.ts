@@ -90,6 +90,9 @@ export interface AppState {
   squareFontSize: number;
   edgeFontSize: number;
   pointFontSize: number;
+  labelColor: string;
+  labelStroke: boolean;
+  labelStrokeColor: string;
 
   // Markers
   markers: MarkerData[];

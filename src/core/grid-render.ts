@@ -19,6 +19,13 @@ const gridLabels: L.Marker[] = [];
 const snailElements: L.Layer[] = [];
 const edgeLabelMarkers: L.Marker[] = [];
 
+/** Build text-shadow CSS for label stroke */
+function labelTextShadow(): string {
+  if (!state.get('labelStroke')) return 'none';
+  const c = state.get('labelStrokeColor');
+  return `1px 1px 0 ${c}, -1px -1px 0 ${c}, 1px -1px 0 ${c}, -1px 1px 0 ${c}, 0 1px 0 ${c}, 0 -1px 0 ${c}, 1px 0 0 ${c}, -1px 0 0 ${c}`;
+}
+
 /** Clear all visual grid layers from map */
 function clearVisuals(): void {
   const map = getMap();
@@ -58,33 +65,39 @@ function renderPolygons(squares: GridSquare[]): void {
 
 /** Render square labels (names, A1 scale, skip A2) */
 function renderSquareLabels(squares: GridSquare[]): void {
-  if (!state.get('showSquareNames')) return;
   const map = getMap();
   const fontFamily = state.get('fontFamily');
   const fontSize = state.get('squareFontSize');
   const gridSize = state.get('gridSize');
   const position = state.get('squareNamePosition');
+  const showNames = state.get('showSquareNames');
 
   for (const sq of squares) {
     if (sq.isSnail) continue; // A2 — no text label
 
+    // Scale label (A1) always visible; names only when showSquareNames
+    if (!sq.isScale && !showNames) continue;
+
     const labelText = sq.isScale ? `<${gridSize} м>` : sq.name;
-    const latlng = getLabelPosition(sq.bounds, position, sq.isScale);
+    const pos = sq.isScale ? 'center' : position;
+    const latlng = getLabelPosition(sq.bounds, pos, sq.isScale);
+    const textAlign = getTextAlign(pos);
 
     const icon = L.divIcon({
       className: 'grid-label',
       html: `<div style="
         font-size:${fontSize}px;
         font-weight:bold;
-        color:white;
+        color:${state.get('labelColor')};
         font-family:${fontFamily};
         pointer-events:none;
         user-select:none;
         white-space:nowrap;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        text-align:${textAlign};
+        text-shadow:${labelTextShadow()};
       ">${labelText}</div>`,
       iconSize: [80, 20],
-      iconAnchor: getAnchor(position, sq.isScale),
+      iconAnchor: getAnchor(pos, sq.isScale),
     });
 
     const marker = L.marker(latlng, { icon, interactive: false, zIndexOffset: 1000 });
@@ -114,6 +127,13 @@ function getLabelPosition(b: Bounds, pos: string, isScale: boolean): [number, nu
 
   const [vPos, hPos] = pos.includes('-') ? pos.split('-') : ['center', pos];
   return [latMap[vPos] ?? latMap['center'], lngMap[hPos] ?? lngMap['center']];
+}
+
+function getTextAlign(pos: string): string {
+  const hPos = pos.includes('-') ? pos.split('-')[1] : pos;
+  if (hPos === 'left') return 'left';
+  if (hPos === 'right') return 'right';
+  return 'center';
 }
 
 function getAnchor(pos: string, isScale: boolean): [number, number] {
@@ -171,12 +191,12 @@ function renderSnail(sq: GridSquare): void {
       html: `<div style="
         font-size:${fontSize}px;
         font-weight:bold;
-        color:white;
+        color:${state.get('labelColor')};
         font-family:${fontFamily};
         text-align:center;
         pointer-events:none;
         user-select:none;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        text-shadow:${labelTextShadow()};
       ">${p.n}</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
@@ -211,12 +231,12 @@ function renderEdgeLabels(squares: GridSquare[]): void {
       html: `<div style="
         font-size:${fontSize}px;
         font-weight:bold;
-        color:white;
+        color:${state.get('labelColor')};
         font-family:${fontFamily};
         text-align:center;
         pointer-events:none;
         user-select:none;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        text-shadow:${labelTextShadow()};
       ">${text}</div>`,
       iconSize: [30, 20],
       iconAnchor: [15, 10],

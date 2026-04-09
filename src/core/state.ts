@@ -12,6 +12,9 @@ import {
   DEFAULT_SQUARE_FONT_SIZE,
   DEFAULT_EDGE_FONT_SIZE,
   DEFAULT_POINT_FONT_SIZE,
+  DEFAULT_LABEL_COLOR,
+  DEFAULT_LABEL_STROKE,
+  DEFAULT_LABEL_STROKE_COLOR,
 } from '../constants';
 
 function createDefaultState(): AppState {
@@ -38,6 +41,9 @@ function createDefaultState(): AppState {
     squareFontSize: DEFAULT_SQUARE_FONT_SIZE,
     edgeFontSize: DEFAULT_EDGE_FONT_SIZE,
     pointFontSize: DEFAULT_POINT_FONT_SIZE,
+    labelColor: DEFAULT_LABEL_COLOR,
+    labelStroke: DEFAULT_LABEL_STROKE,
+    labelStrokeColor: DEFAULT_LABEL_STROKE_COLOR,
 
     markers: [],
 
