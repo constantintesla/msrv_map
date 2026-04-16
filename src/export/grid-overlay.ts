@@ -15,8 +15,12 @@ export async function renderGridOverlay(
   const sqFontSize = state.get('squareFontSize');
   const edgeFontSize = state.get('edgeFontSize');
   const showNames = state.get('showSquareNames');
+  const namePosition = state.get('squareNamePosition');
   const showEdge = state.get('showEdgeLabels');
   const startLetter = state.get('startLetter');
+  const labelColor = state.get('labelColor');
+  const labelStroke = state.get('labelStroke');
+  const labelStrokeColor = state.get('labelStrokeColor');
 
   // Canvas dimensions proportional to bounds
   const latRange = gridBounds.north - gridBounds.south;
@@ -37,9 +41,23 @@ export async function renderGridOverlay(
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  // Simple linear projection (good enough for grid-scale areas)
+  const fontScale = width / 1000;
+
+  // Simple linear projection
   const projX = (lng: number) => ((lng - gridBounds.west) / lngRange) * width;
   const projY = (lat: number) => ((gridBounds.north - lat) / latRange) * height;
+
+  // Helper: configure text shadow (stroke effect)
+  function setupTextShadow() {
+    if (labelStroke) {
+      ctx.shadowColor = labelStrokeColor;
+      ctx.shadowBlur = 3;
+    }
+  }
+  function clearTextShadow() {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+  }
 
   // Draw grid lines
   ctx.strokeStyle = gridColor;
@@ -56,10 +74,9 @@ export async function renderGridOverlay(
 
   // Draw square labels
   if (showNames) {
-    ctx.fillStyle = 'white';
-    const scaledFontSize = Math.round(sqFontSize * (width / 1000));
-    const namePosition = state.get('squareNamePosition');
-    const pad = 0.05; // 5% padding from edge
+    ctx.fillStyle = labelColor;
+    const scaledFontSize = Math.round(sqFontSize * fontScale);
+    const pad = 0.05;
 
     for (const sq of squares) {
       if (sq.isSnail) continue;
@@ -70,17 +87,13 @@ export async function renderGridOverlay(
       const pos = sq.isScale ? 'center' : namePosition;
       const [vPos, hPos] = pos.includes('-') ? pos.split('-') : ['center', pos];
 
-      const latRange_sq = b.north - b.south;
-      const lngRange_sq = b.east - b.west;
+      const latR = b.north - b.south;
+      const lngR = b.east - b.west;
       const latMap: Record<string, number> = {
-        'top': b.north - latRange_sq * pad,
-        'center': (b.north + b.south) / 2,
-        'bottom': b.south + latRange_sq * pad,
+        'top': b.north - latR * pad, 'center': (b.north + b.south) / 2, 'bottom': b.south + latR * pad,
       };
       const lngMap: Record<string, number> = {
-        'left': b.west + lngRange_sq * pad,
-        'center': (b.east + b.west) / 2,
-        'right': b.east - lngRange_sq * pad,
+        'left': b.west + lngR * pad, 'center': (b.east + b.west) / 2, 'right': b.east - lngR * pad,
       };
 
       const cx = projX(lngMap[hPos] ?? lngMap['center']);
@@ -88,7 +101,10 @@ export async function renderGridOverlay(
 
       ctx.textAlign = hPos === 'left' ? 'left' : hPos === 'right' ? 'right' : 'center';
       ctx.textBaseline = vPos === 'top' ? 'top' : vPos === 'bottom' ? 'bottom' : 'middle';
+
+      setupTextShadow();
       ctx.fillText(text, cx, cy);
+      clearTextShadow();
     }
   }
 
@@ -108,36 +124,40 @@ export async function renderGridOverlay(
     ctx.moveTo(x1, cy); ctx.lineTo(x2, cy);
     ctx.stroke();
 
-    const snailFontSize = Math.round((sqFontSize + 5) * (width / 1000));
+    const snailFontSize = Math.round((sqFontSize + 5) * fontScale);
     ctx.font = `bold ${snailFontSize}px ${fontFamily}`;
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    setupTextShadow();
     ctx.fillText('1', (x1 + cx) / 2, (y1 + cy) / 2);
     ctx.fillText('2', (x2 + cx) / 2, (y1 + cy) / 2);
     ctx.fillText('3', (x2 + cx) / 2, (y2 + cy) / 2);
     ctx.fillText('4', (x1 + cx) / 2, (y2 + cy) / 2);
+    clearTextShadow();
   }
 
   // Draw edge labels
   const rows = getGridRows(squares);
   const cols = getGridCols(squares);
-  const scaledEdgeFont = Math.round(edgeFontSize * (width / 1000));
+  const scaledEdgeFont = Math.round(edgeFontSize * fontScale);
   ctx.font = `bold ${scaledEdgeFont}px ${fontFamily}`;
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = labelColor;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const edgeOffset = width * 0.02;
+  const edgePad = 15 * fontScale;
+
+  setupTextShadow();
 
   for (const row of rows) {
     const sq = squares.find(s => s.row === row);
     if (!sq) continue;
     const letter = getSquareName(row, 0, startLetter).charAt(0);
     const y = projY((sq.bounds.north + sq.bounds.south) / 2);
-    if (showEdge.left) ctx.fillText(letter, edgeOffset, y);
-    if (showEdge.right) ctx.fillText(letter, width - edgeOffset, y);
+    if (showEdge.left) ctx.fillText(letter, edgePad, y);
+    if (showEdge.right) ctx.fillText(letter, width - edgePad, y);
   }
 
   for (const col of cols) {
@@ -145,9 +165,11 @@ export async function renderGridOverlay(
     if (!sq) continue;
     const num = String(col + 1);
     const x = projX((sq.bounds.east + sq.bounds.west) / 2);
-    if (showEdge.top) ctx.fillText(num, x, edgeOffset);
-    if (showEdge.bottom) ctx.fillText(num, x, height - edgeOffset);
+    if (showEdge.top) ctx.fillText(num, x, edgePad);
+    if (showEdge.bottom) ctx.fillText(num, x, height - edgePad);
   }
+
+  clearTextShadow();
 
   // Convert to blob
   return new Promise((resolve, reject) => {
