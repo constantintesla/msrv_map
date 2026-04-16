@@ -95,15 +95,15 @@ function parseKml(content: string): ParseResult {
     const coords = point.querySelector('coordinates')?.textContent?.trim();
     if (!coords) continue;
 
-    // Skip grid square labels
+    const styleUrl = pm.querySelector('styleUrl')?.textContent?.trim() ?? '';
+
+    // Skip grid/edge label placemarks (by style or name pattern)
+    if (isGridLabelStyle(styleUrl)) continue;
     if (gridNames.has(name) || isSquareLabel(name)) continue;
-    // Skip snail numbers
-    if (/^[1-4]$/.test(name)) continue;
 
     const [lng, lat] = coords.split(',').map(Number);
     if (isNaN(lat) || isNaN(lng)) continue;
 
-    const styleUrl = pm.querySelector('styleUrl')?.textContent?.trim() ?? '';
     const type = resolveMarkerType(pm, styleUrl, styleTypeMap);
 
     markers.push({
@@ -142,7 +142,15 @@ function letterToRow(letter: string): number {
 function isSquareLabel(name: string): boolean {
   if (GRID_NAME_PATTERN.test(name)) return true;
   if (/^<?\d+ м>?$/.test(name)) return true;
+  // Single letter (Latin or Cyrillic) — edge label
+  if (/^[A-ZА-Яa-zа-я]$/.test(name)) return true;
+  // Single number — edge label or snail
+  if (/^\d+$/.test(name)) return true;
   return false;
+}
+
+function isGridLabelStyle(styleUrl: string): boolean {
+  return styleUrl === '#squareLabelStyle' || styleUrl === '#edgeLabelStyle';
 }
 
 function buildStyleTypeMap(doc: Document): Map<string, MarkerType> {

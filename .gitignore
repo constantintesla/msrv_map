@@ -58,3 +58,12 @@ exports/
 .dolt/
 *.db
 .beads-credential-key
+
+.beads/
+.claude/
+.serena/
+docs/
+e2e/
+test-results/
+bash.exe.stackdump
+playwright.config.ts

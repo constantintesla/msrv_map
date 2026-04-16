@@ -57,16 +57,37 @@ export async function renderGridOverlay(
   // Draw square labels
   if (showNames) {
     ctx.fillStyle = 'white';
-    ctx.textBaseline = 'middle';
     const scaledFontSize = Math.round(sqFontSize * (width / 1000));
+    const namePosition = state.get('squareNamePosition');
+    const pad = 0.05; // 5% padding from edge
 
     for (const sq of squares) {
       if (sq.isSnail) continue;
       const text = sq.isScale ? `<${gridSize} м>` : sq.name;
       ctx.font = `bold ${scaledFontSize}px ${fontFamily}`;
-      const cx = projX((sq.bounds.east + sq.bounds.west) / 2);
-      const cy = projY((sq.bounds.north + sq.bounds.south) / 2);
-      ctx.textAlign = 'center';
+
+      const b = sq.bounds;
+      const pos = sq.isScale ? 'center' : namePosition;
+      const [vPos, hPos] = pos.includes('-') ? pos.split('-') : ['center', pos];
+
+      const latRange_sq = b.north - b.south;
+      const lngRange_sq = b.east - b.west;
+      const latMap: Record<string, number> = {
+        'top': b.north - latRange_sq * pad,
+        'center': (b.north + b.south) / 2,
+        'bottom': b.south + latRange_sq * pad,
+      };
+      const lngMap: Record<string, number> = {
+        'left': b.west + lngRange_sq * pad,
+        'center': (b.east + b.west) / 2,
+        'right': b.east - lngRange_sq * pad,
+      };
+
+      const cx = projX(lngMap[hPos] ?? lngMap['center']);
+      const cy = projY(latMap[vPos] ?? latMap['center']);
+
+      ctx.textAlign = hPos === 'left' ? 'left' : hPos === 'right' ? 'right' : 'center';
+      ctx.textBaseline = vPos === 'top' ? 'top' : vPos === 'bottom' ? 'bottom' : 'middle';
       ctx.fillText(text, cx, cy);
     }
   }
