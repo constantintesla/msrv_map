@@ -10,6 +10,7 @@ import { initTabMarkers } from './ui/tab-markers';
 import { initTabFile } from './ui/tab-file';
 import { initExportPanel } from './ui/export-panel';
 import { showPngPreviewModal } from './ui/modal-png';
+import { showHelpModal } from './ui/modal-help';
 import { exportKmz, exportKml } from './export/kmz';
 import { exportPng } from './export/png-renderer';
 // Import render modules to register event listeners
@@ -31,4 +32,10 @@ document.addEventListener('DOMContentLoaded', () => {
       exportPng(zoneMode, zoom);
     }),
   });
+
+  const helpBtn = document.getElementById('btn-header-help');
+  helpBtn?.addEventListener('click', () => showHelpModal());
+
+  // Show instructions on first render of the session
+  showHelpModal();
 });
