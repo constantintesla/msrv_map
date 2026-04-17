@@ -63,7 +63,6 @@ exports/
 .claude/
 .serena/
 docs/
-e2e/
 test-results/
 bash.exe.stackdump
 playwright.config.ts

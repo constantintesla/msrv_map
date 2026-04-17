@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const helpBtn = document.getElementById('btn-header-help');
   helpBtn?.addEventListener('click', () => showHelpModal());
 
-  // Show instructions on first render of the session
-  showHelpModal();
+  // Show instructions on first render of the session.
+  // Suppressed via ?skip-help=1 for e2e tests that click tabs/buttons right away.
+  const skipHelp = new URLSearchParams(location.search).has('skip-help');
+  if (!skipHelp) showHelpModal();
 });
