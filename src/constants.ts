@@ -82,8 +82,8 @@ export const DEFAULT_LABEL_STROKE_COLOR = '#000000';
 
 // === PNG Export ===
 
-export const PNG_MAX_SIDE = 3000;
-export const PNG_MIN_SIDE = 1200;
+export const PNG_MAX_SIDE = 4000;
+export const PNG_MIN_SIDE = 1500;
 export const PNG_BUFFER_METERS = 40;
 
 // === Grid Overlay for KMZ ===

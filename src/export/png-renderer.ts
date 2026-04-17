@@ -2,9 +2,9 @@ import type { Bounds } from '../types';
 import { state } from '../core/state';
 import { getTileUrl, getMapBounds } from '../core/map';
 import { createProjection, bufferBounds, boundsSizeMeters, lngToMercatorX } from '../utils/geo';
-import { getSquareName, getGridRows, getGridCols } from '../core/grid';
 import { downloadBlob } from '../utils/download';
 import { MARKER_COLORS, PNG_MAX_SIDE, PNG_MIN_SIDE, PNG_BUFFER_METERS } from '../constants';
+import { drawGridOnCanvas } from './grid-painter';
 
 /** Get recommended zoom for a given zone mode */
 export function getRecommendedZoom(zoneMode: string): number {
@@ -42,6 +42,8 @@ export async function renderToCanvas(zoneMode: string, zoomOverride?: number, ma
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   await loadTiles(ctx, proj);
   drawGrid(ctx, proj);
@@ -130,146 +132,28 @@ async function loadTiles(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof 
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createProjection>): void {
-  const squares = state.get('gridSquares');
-  if (squares.length === 0) return;
-
-  const gridColor = state.get('gridColor');
-  const gridWeight = state.get('gridWeight');
-  const fontFamily = state.get('fontFamily');
-  const sqFontSize = state.get('squareFontSize');
-  const edgeFontSize = state.get('edgeFontSize');
-  const showNames = state.get('showSquareNames');
-  const showEdge = state.get('showEdgeLabels');
-  const gridBounds = state.get('gridBounds');
-  const gridSize = state.get('gridSize');
-  const startLetter = state.get('startLetter');
-  const labelColor = state.get('labelColor');
-  const labelStroke = state.get('labelStroke');
-  const labelStrokeColor = state.get('labelStrokeColor');
-
-  const fontScale = proj.canvasW / 1500;
-
-  // Shadow stroke effect: user-controlled colour when enabled, else default dark halo
-  const shadowColor = labelStroke ? labelStrokeColor : 'rgba(0,0,0,0.8)';
-
-  // Grid lines (scale weight by canvas so KMZ overlay matches)
-  ctx.strokeStyle = gridColor;
-  ctx.lineWidth = Math.max(1, gridWeight * fontScale);
-
-  for (const sq of squares) {
-    const x1 = proj.x(sq.bounds.west);
-    const y1 = proj.y(sq.bounds.north);
-    const x2 = proj.x(sq.bounds.east);
-    const y2 = proj.y(sq.bounds.south);
-    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-  }
-
-  // Labels
-  if (showNames) {
-    ctx.fillStyle = labelColor;
-    const scaledFont = Math.round(sqFontSize * fontScale);
-    const namePosition = state.get('squareNamePosition');
-    const pad = 0.05; // 5% padding from edge
-
-    for (const sq of squares) {
-      if (sq.isSnail) continue;
-      const text = sq.isScale ? `<${gridSize} м>` : sq.name;
-      ctx.font = `bold ${scaledFont}px ${fontFamily}`;
-
-      const b = sq.bounds;
-      const latRange = b.north - b.south;
-      const lngRange = b.east - b.west;
-
-      // Scale label always centered; grid labels use selected position
-      const pos = sq.isScale ? 'center' : namePosition;
-      const [vPos, hPos] = pos.includes('-') ? pos.split('-') : ['center', pos];
-
-      const latMap: Record<string, number> = {
-        'top': b.north - latRange * pad,
-        'center': (b.north + b.south) / 2,
-        'bottom': b.south + latRange * pad,
-      };
-      const lngMap: Record<string, number> = {
-        'left': b.west + lngRange * pad,
-        'center': (b.east + b.west) / 2,
-        'right': b.east - lngRange * pad,
-      };
-
-      const cx = proj.x(lngMap[hPos] ?? lngMap['center']);
-      const cy = proj.y(latMap[vPos] ?? latMap['center']);
-
-      ctx.textAlign = hPos === 'left' ? 'left' : hPos === 'right' ? 'right' : 'center';
-      ctx.textBaseline = vPos === 'top' ? 'top' : vPos === 'bottom' ? 'bottom' : 'middle';
-
-      ctx.shadowColor = shadowColor;
-      ctx.shadowBlur = 3;
-      ctx.fillText(text, cx, cy);
-      ctx.shadowBlur = 0;
-    }
-  }
-
-  // Snail
-  const snailSq = squares.find(s => s.isSnail);
-  if (snailSq) {
-    const b = snailSq.bounds;
-    const cx = proj.x((b.east + b.west) / 2);
-    const cy = proj.y((b.north + b.south) / 2);
-
-    ctx.beginPath();
-    ctx.moveTo(cx, proj.y(b.north)); ctx.lineTo(cx, proj.y(b.south));
-    ctx.moveTo(proj.x(b.west), cy); ctx.lineTo(proj.x(b.east), cy);
-    ctx.stroke();
-
-    const snailFont = Math.round((sqFontSize + 5) * fontScale);
-    ctx.font = `bold ${snailFont}px ${fontFamily}`;
-    ctx.fillStyle = labelColor;
-    ctx.textAlign = 'center';
-    ctx.shadowColor = shadowColor;
-    ctx.shadowBlur = 3;
-
-    const x1 = proj.x(b.west), x2 = proj.x(b.east);
-    const y1 = proj.y(b.north), y2 = proj.y(b.south);
-    ctx.fillText('1', (x1 + cx) / 2, (y1 + cy) / 2);
-    ctx.fillText('2', (x2 + cx) / 2, (y1 + cy) / 2);
-    ctx.fillText('3', (x2 + cx) / 2, (y2 + cy) / 2);
-    ctx.fillText('4', (x1 + cx) / 2, (y2 + cy) / 2);
-    ctx.shadowBlur = 0;
-  }
-
-  // Edge labels
-  if (gridBounds) {
-    const rows = getGridRows(squares);
-    const cols = getGridCols(squares);
-    const scaledEdge = Math.round(edgeFontSize * fontScale);
-    ctx.font = `bold ${scaledEdge}px ${fontFamily}`;
-    ctx.fillStyle = labelColor;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = shadowColor;
-    ctx.shadowBlur = 3;
-
-    const pad = 15 * fontScale;
-
-    for (const row of rows) {
-      const sq = squares.find(s => s.row === row);
-      if (!sq) continue;
-      const letter = getSquareName(row, 0, startLetter).charAt(0);
-      const y = proj.y((sq.bounds.north + sq.bounds.south) / 2);
-      if (showEdge.left) ctx.fillText(letter, proj.x(gridBounds.west) - pad, y);
-      if (showEdge.right) ctx.fillText(letter, proj.x(gridBounds.east) + pad, y);
-    }
-
-    for (const col of cols) {
-      const sq = squares.find(s => s.col === col);
-      if (!sq) continue;
-      const num = String(col + 1);
-      const x = proj.x((sq.bounds.east + sq.bounds.west) / 2);
-      if (showEdge.top) ctx.fillText(num, x, proj.y(gridBounds.north) - pad);
-      if (showEdge.bottom) ctx.fillText(num, x, proj.y(gridBounds.south) + pad);
-    }
-
-    ctx.shadowBlur = 0;
-  }
+  drawGridOnCanvas(ctx, {
+    squares: state.get('gridSquares'),
+    gridBounds: state.get('gridBounds'),
+    projX: proj.x,
+    projY: proj.y,
+    canvasW: proj.canvasW,
+    canvasH: proj.canvasH,
+    gridSize: state.get('gridSize'),
+    gridColor: state.get('gridColor'),
+    gridWeight: state.get('gridWeight'),
+    startLetter: state.get('startLetter'),
+    fontFamily: state.get('fontFamily'),
+    squareFontSize: state.get('squareFontSize'),
+    edgeFontSize: state.get('edgeFontSize'),
+    showSquareNames: state.get('showSquareNames'),
+    squareNamePosition: state.get('squareNamePosition'),
+    showEdgeLabels: state.get('showEdgeLabels'),
+    labelColor: state.get('labelColor'),
+    labelStroke: state.get('labelStroke'),
+    labelStrokeColor: state.get('labelStrokeColor'),
+    edgeLabelsOutside: true,
+  });
 }
 
 function drawMarkers(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createProjection>): void {
