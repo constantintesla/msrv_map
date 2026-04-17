@@ -8,6 +8,7 @@ import { renderAllMarkers } from '../core/markers-render';
 import { listProjects, saveProject, loadProject, deleteProject } from '../core/projects';
 import { state } from '../core/state';
 import { bus } from '../core/events';
+import { fitToGrid, loadTileLayer } from '../core/map';
 
 export function initTabFile(): void {
   const container = $<HTMLDivElement>('#tab-file');
@@ -73,6 +74,7 @@ export function initTabFile(): void {
       await importFile(file);
       renderAll();
       renderAllMarkers();
+      fitToGrid();
     } catch (err) {
       alert('Ошибка импорта: ' + (err as Error).message);
     }
@@ -106,8 +108,10 @@ export function initTabFile(): void {
       item.querySelector('.project-load')?.addEventListener('click', () => {
         if (confirm('Загрузить проект? Текущие данные будут заменены.')) {
           loadProject(id);
+          loadTileLayer(state.get('mapType'));
           renderAll();
           renderAllMarkers();
+          fitToGrid();
         }
       });
       item.querySelector('.project-delete')?.addEventListener('click', () => {

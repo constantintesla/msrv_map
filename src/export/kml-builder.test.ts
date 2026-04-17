@@ -26,11 +26,9 @@ describe('buildKml', () => {
     expect(kml).toContain('131.885,43.115,0');
   });
 
-  it('includes grid square as Polygon', () => {
+  it('does not emit grid polygons (KML is points-only)', () => {
     const kml = buildKml({ markers: [], squares: [square], gridBounds: square.bounds, gridSize: 100, gridColor: '#667eea', gridWeight: 2, showSquareNames: true, showPointLabels: true, showEdgeLabels: { left: false, right: false, top: false, bottom: false }, startLetter: 'A' });
-    expect(kml).toContain('<Polygon>');
-    // isScale square with showSquareNames=true shows grid size as label
-    expect(kml).toContain('&lt;100 м&gt;');
-    expect(kml).toContain('<Folder><name>Сетка</name>');
+    expect(kml).not.toContain('<Polygon>');
+    expect(kml).not.toContain('Сетка');
   });
 });

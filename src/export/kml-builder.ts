@@ -23,12 +23,8 @@ function hexToKmlColor(hex: string, alpha: string = 'ff'): string {
   return `${alpha}${b}${g}${r}`;
 }
 
-function kmlStyles(opts: KmlBuildOptions): string {
-  const gridKmlColor = hexToKmlColor(opts.gridColor);
+function kmlStyles(_opts: KmlBuildOptions): string {
   const lines: string[] = [];
-
-  // Grid square style — polygon name displayed by KML viewer at centroid
-  lines.push(`<Style id="gridSquareStyle"><LineStyle><color>${gridKmlColor}</color><width>${Math.max(1, opts.gridWeight)}</width></LineStyle><PolyStyle><fill>0</fill></PolyStyle><LabelStyle><color>ffffffff</color><scale>0.7</scale></LabelStyle></Style>`);
 
   // Marker styles
   for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
@@ -42,18 +38,6 @@ function kmlStyles(opts: KmlBuildOptions): string {
 function pointPlacemark(name: string, styleUrl: string, lat: number, lng: number, description?: string): string {
   return `<Placemark><name>${escapeXml(name)}</name>${description ? `<description>${escapeXml(description)}</description>` : ''}<styleUrl>${styleUrl}</styleUrl><Point><coordinates>${formatKmlCoord(lat, lng)}</coordinates></Point></Placemark>`;
 }
-
-function polygonPlacemark(name: string, styleUrl: string, b: Bounds): string {
-  const coords = [
-    formatKmlCoord(b.north, b.west),
-    formatKmlCoord(b.north, b.east),
-    formatKmlCoord(b.south, b.east),
-    formatKmlCoord(b.south, b.west),
-    formatKmlCoord(b.north, b.west),
-  ].join(' ');
-  return `<Placemark><name>${escapeXml(name)}</name><styleUrl>${styleUrl}</styleUrl><Polygon><outerBoundaryIs><LinearRing><coordinates>${coords}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`;
-}
-
 
 export function buildKml(opts: KmlBuildOptions): string {
   const parts: string[] = [];
@@ -73,21 +57,6 @@ export function buildKml(opts: KmlBuildOptions): string {
       parts.push(pointPlacemark(name, `#marker-${m.type}`, m.latlng.lat, m.latlng.lng, desc));
     }
     parts.push('</Folder>');
-  }
-
-  // Grid folder
-  if (opts.squares.length > 0) {
-    parts.push('<Folder><name>Сетка</name>');
-    for (const sq of opts.squares) {
-      // Polygon name shown by viewer at centroid; scale label shows grid size
-      const displayName = (opts.showSquareNames && !sq.isSnail)
-        ? (sq.isScale ? `<${opts.gridSize} м>` : sq.name)
-        : '';
-      parts.push(polygonPlacemark(displayName, '#gridSquareStyle', sq.bounds));
-    }
-    parts.push('</Folder>');
-
-    // Snail (A2) omitted from KML/KMZ — renders poorly in mobile viewers
   }
 
   parts.push('</Document>');

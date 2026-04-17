@@ -2,6 +2,7 @@ import { $ } from '../utils/dom';
 import { TILE_PROVIDERS } from '../constants';
 import { state } from '../core/state';
 import { loadTileLayer } from '../core/map';
+import { bus } from '../core/events';
 
 export function initTabMap(): void {
   const container = $<HTMLDivElement>('#tab-map');
@@ -24,6 +25,13 @@ export function initTabMap(): void {
       if (radio.checked) {
         loadTileLayer(radio.value as any);
       }
+    });
+  });
+
+  bus.on('project:loaded', () => {
+    const current = state.get('mapType');
+    container.querySelectorAll<HTMLInputElement>('input[name="map-type"]').forEach(r => {
+      r.checked = r.value === current;
     });
   });
 }

@@ -184,6 +184,32 @@ export function initTabGrid(): void {
   container.addEventListener('change', syncAllState);
   container.addEventListener('input', syncAllState);
 
+  // Sync inputs from state (e.g. after project load)
+  function syncInputsFromState() {
+    $<HTMLInputElement>('#input-grid-size').value = String(state.get('gridSize'));
+    $<HTMLInputElement>('#input-start-letter').value = state.get('startLetter');
+    $<HTMLInputElement>('#input-shift-step').value = String(state.get('gridShiftStep'));
+    $<HTMLInputElement>('#input-grid-color').value = state.get('gridColor');
+    $<HTMLInputElement>('#input-grid-weight').value = String(state.get('gridWeight'));
+    $<HTMLSelectElement>('#select-font-family').value = state.get('fontFamily');
+    $<HTMLInputElement>('#input-sq-font').value = String(state.get('squareFontSize'));
+    $<HTMLInputElement>('#input-edge-font').value = String(state.get('edgeFontSize'));
+    $<HTMLInputElement>('#input-label-color').value = state.get('labelColor');
+    const stroke = state.get('labelStroke');
+    $<HTMLInputElement>('#chk-label-stroke').checked = stroke;
+    $<HTMLDivElement>('#field-stroke-options').style.display = stroke ? '' : 'none';
+    $<HTMLInputElement>('#input-stroke-color').value = state.get('labelStrokeColor');
+    $<HTMLInputElement>('#chk-show-names').checked = state.get('showSquareNames');
+    $<HTMLSelectElement>('#select-name-pos').value = state.get('squareNamePosition');
+    const edge = state.get('showEdgeLabels');
+    $<HTMLInputElement>('#chk-edge-left').checked = edge.left;
+    $<HTMLInputElement>('#chk-edge-right').checked = edge.right;
+    $<HTMLInputElement>('#chk-edge-top').checked = edge.top;
+    $<HTMLInputElement>('#chk-edge-bottom').checked = edge.bottom;
+  }
+
+  bus.on('project:loaded', syncInputsFromState);
+
   // Zone events
   bus.on('zone:selected', () => {
     $<HTMLButtonElement>('#btn-clear-zone').style.display = '';

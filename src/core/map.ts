@@ -71,6 +71,21 @@ export function getTileUrl(tileX: number, tileY: number, zoom: number): string |
   return null;
 }
 
+/** Fit map view to current grid bounds (or selected zone) if any */
+export function fitToGrid(options?: { padding?: number; maxZoom?: number }): boolean {
+  const bounds = state.get('gridBounds') ?? state.get('selectedZone');
+  if (!bounds) return false;
+  const latLngBounds = L.latLngBounds(
+    [bounds.south, bounds.west],
+    [bounds.north, bounds.east],
+  );
+  map.fitBounds(latLngBounds, {
+    padding: [options?.padding ?? 30, options?.padding ?? 30],
+    maxZoom: options?.maxZoom,
+  });
+  return true;
+}
+
 /** Get current map bounds as our Bounds type */
 export function getMapBounds() {
   const b = map.getBounds();

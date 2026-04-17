@@ -41,27 +41,27 @@ export async function renderGridOverlay(
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  const fontScale = width / 1000;
+  // Match PNG renderer's scale factor (canvasW / 1500)
+  const fontScale = width / 1500;
 
   // Simple linear projection
   const projX = (lng: number) => ((lng - gridBounds.west) / lngRange) * width;
   const projY = (lat: number) => ((gridBounds.north - lat) / latRange) * height;
 
-  // Helper: configure text shadow (stroke effect)
+  // User-controlled text shadow colour (matches PNG renderer)
+  const shadowColor = labelStroke ? labelStrokeColor : 'rgba(0,0,0,0.8)';
   function setupTextShadow() {
-    if (labelStroke) {
-      ctx.shadowColor = labelStrokeColor;
-      ctx.shadowBlur = 3;
-    }
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = 3;
   }
   function clearTextShadow() {
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
   }
 
-  // Draw grid lines
+  // Draw grid lines (scale weight by canvas like fonts so KMZ matches PNG visually)
   ctx.strokeStyle = gridColor;
-  ctx.lineWidth = Math.max(1, gridWeight);
+  ctx.lineWidth = Math.max(1, gridWeight * fontScale);
 
   for (const sq of squares) {
     const b = sq.bounds;

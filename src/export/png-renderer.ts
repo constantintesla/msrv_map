@@ -143,12 +143,18 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
   const gridBounds = state.get('gridBounds');
   const gridSize = state.get('gridSize');
   const startLetter = state.get('startLetter');
+  const labelColor = state.get('labelColor');
+  const labelStroke = state.get('labelStroke');
+  const labelStrokeColor = state.get('labelStrokeColor');
 
   const fontScale = proj.canvasW / 1500;
 
-  // Grid lines
+  // Shadow stroke effect: user-controlled colour when enabled, else default dark halo
+  const shadowColor = labelStroke ? labelStrokeColor : 'rgba(0,0,0,0.8)';
+
+  // Grid lines (scale weight by canvas so KMZ overlay matches)
   ctx.strokeStyle = gridColor;
-  ctx.lineWidth = Math.max(1, gridWeight);
+  ctx.lineWidth = Math.max(1, gridWeight * fontScale);
 
   for (const sq of squares) {
     const x1 = proj.x(sq.bounds.west);
@@ -160,7 +166,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
 
   // Labels
   if (showNames) {
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = labelColor;
     const scaledFont = Math.round(sqFontSize * fontScale);
     const namePosition = state.get('squareNamePosition');
     const pad = 0.05; // 5% padding from edge
@@ -195,7 +201,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
       ctx.textAlign = hPos === 'left' ? 'left' : hPos === 'right' ? 'right' : 'center';
       ctx.textBaseline = vPos === 'top' ? 'top' : vPos === 'bottom' ? 'bottom' : 'middle';
 
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowColor = shadowColor;
       ctx.shadowBlur = 3;
       ctx.fillText(text, cx, cy);
       ctx.shadowBlur = 0;
@@ -216,9 +222,9 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
 
     const snailFont = Math.round((sqFontSize + 5) * fontScale);
     ctx.font = `bold ${snailFont}px ${fontFamily}`;
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowColor = shadowColor;
     ctx.shadowBlur = 3;
 
     const x1 = proj.x(b.west), x2 = proj.x(b.east);
@@ -236,10 +242,10 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
     const cols = getGridCols(squares);
     const scaledEdge = Math.round(edgeFontSize * fontScale);
     ctx.font = `bold ${scaledEdge}px ${fontFamily}`;
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowColor = shadowColor;
     ctx.shadowBlur = 3;
 
     const pad = 15 * fontScale;
