@@ -256,7 +256,12 @@ export function initTabMarkers(): void {
     const type = $<HTMLSelectElement>('#edit-marker-type').value as MarkerType;
     const icon = currentIconSelection();
     const colorInput = $<HTMLInputElement>('#edit-marker-color');
-    const color = icon ? undefined : colorInput.value;
+    let color: string | undefined;
+    if (!icon) {
+      const picked = colorInput.value.toLowerCase();
+      const typeDefault = MARKER_COLORS[type].toLowerCase();
+      color = picked === typeDefault ? undefined : colorInput.value;
+    }
     const name = $<HTMLInputElement>('#edit-marker-name').value;
     const description = $<HTMLTextAreaElement>('#edit-marker-desc').value;
     updateMarker(editingId, { type, icon, color, name, description });
@@ -272,6 +277,11 @@ export function initTabMarkers(): void {
   });
 
   bus.on('marker:edit-request', ({ id }) => openEditor(id));
+
+  bus.on('marker:removed', ({ id }) => { if (id === editingId) closeEditor(); });
+  bus.on('markers:cleared', closeEditor);
+  bus.on('state:reset', closeEditor);
+  bus.on('project:loaded', closeEditor);
 
   bus.on('marker:added', renderMarkersList);
   bus.on('marker:updated', renderMarkersList);

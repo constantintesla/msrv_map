@@ -75,7 +75,7 @@ function renderMarker(data: MarkerData): void {
 
   // Ctrl+Click → open editor
   marker.on('click', (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.ctrlKey) {
+    if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
       bus.emit('marker:edit-request', { id: data.id });
     }
   });
