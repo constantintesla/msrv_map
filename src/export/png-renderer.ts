@@ -184,8 +184,8 @@ async function loadIconImage(url: string): Promise<HTMLImageElement | null> {
     const objectUrl = URL.createObjectURL(blob);
     return await new Promise(resolve => {
       const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
+      img.onload = () => { URL.revokeObjectURL(objectUrl); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(null); };
       img.src = objectUrl;
     });
   } catch {
