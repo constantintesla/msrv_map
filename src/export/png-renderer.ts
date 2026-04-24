@@ -4,6 +4,7 @@ import { getTileUrl, getMapBounds } from '../core/map';
 import { createProjection, bufferBounds, boundsSizeMeters, lngToMercatorX } from '../utils/geo';
 import { downloadBlob } from '../utils/download';
 import { MARKER_COLORS, PNG_MAX_SIDE, PNG_MIN_SIDE, PNG_BUFFER_METERS } from '../constants';
+import { resolveIconLocal } from '../constants/curated-icons';
 import { drawGridOnCanvas } from './grid-painter';
 
 /** Get recommended zoom for a given zone mode */
@@ -47,7 +48,8 @@ export async function renderToCanvas(zoneMode: string, zoomOverride?: number, ma
 
   await loadTiles(ctx, proj);
   drawGrid(ctx, proj);
-  drawMarkers(ctx, proj);
+  const iconCache = await preloadMarkerIcons();
+  drawMarkers(ctx, proj, iconCache);
 
   return canvas;
 }
@@ -156,7 +158,57 @@ function drawGrid(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createP
   });
 }
 
-function drawMarkers(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof createProjection>): void {
+const ICON_LOAD_TIMEOUT_MS = 3000;
+
+async function loadIconImage(url: string): Promise<HTMLImageElement | null> {
+  const localOrRemote = resolveIconLocal(url) ?? url;
+  const isLocal = localOrRemote.startsWith('/');
+
+  if (isLocal) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = localOrRemote;
+    });
+  }
+
+  // Кастомный URL — пробуем fetch → blob → objectURL.
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ICON_LOAD_TIMEOUT_MS);
+    const res = await fetch(localOrRemote, { signal: controller.signal, mode: 'cors' });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    return await new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = objectUrl;
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function preloadMarkerIcons(): Promise<Map<string, HTMLImageElement>> {
+  const markers = state.get('markers');
+  const urls = Array.from(new Set(markers.map(m => m.icon).filter((x): x is string => !!x)));
+  const entries = await Promise.all(urls.map(async url => [url, await loadIconImage(url)] as const));
+  const cache = new Map<string, HTMLImageElement>();
+  for (const [url, img] of entries) {
+    if (img) cache.set(url, img);
+  }
+  return cache;
+}
+
+function drawMarkers(
+  ctx: CanvasRenderingContext2D,
+  proj: ReturnType<typeof createProjection>,
+  iconCache: Map<string, HTMLImageElement>,
+): void {
   const markers = state.get('markers');
   const showLabels = state.get('showPointLabels');
   const fontFamily = state.get('fontFamily');
@@ -166,19 +218,27 @@ function drawMarkers(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof crea
   for (const m of markers) {
     const x = proj.x(m.latlng.lng);
     const y = proj.y(m.latlng.lat);
-    const color = MARKER_COLORS[m.type];
-    const r = 6 * fontScale;
+    const img = m.icon ? iconCache.get(m.icon) : undefined;
 
-    // Circle
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    let labelBaselineY: number;
 
-    // Label
+    if (img) {
+      const size = 32 * fontScale;
+      ctx.drawImage(img, x - size / 2, y - size, size, size);
+      labelBaselineY = y - size - 3;
+    } else {
+      const color = m.color ?? MARKER_COLORS[m.type] ?? MARKER_COLORS.default;
+      const r = 6 * fontScale;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      labelBaselineY = y - r - 3;
+    }
+
     if (showLabels && m.name) {
       const scaledFont = Math.round(fontSize * fontScale);
       ctx.font = `${scaledFont}px ${fontFamily}`;
@@ -187,7 +247,7 @@ function drawMarkers(ctx: CanvasRenderingContext2D, proj: ReturnType<typeof crea
       ctx.textBaseline = 'bottom';
       ctx.shadowColor = 'rgba(0,0,0,0.8)';
       ctx.shadowBlur = 3;
-      ctx.fillText(m.name, x, y - r - 3);
+      ctx.fillText(m.name, x, labelBaselineY);
       ctx.shadowBlur = 0;
     }
   }
