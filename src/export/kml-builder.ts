@@ -23,16 +23,13 @@ function hexToKmlColor(hex: string, alpha: string = 'ff'): string {
   return `${alpha}${b}${g}${r}`;
 }
 
-function kmlStyles(_opts: KmlBuildOptions): string {
-  const lines: string[] = [];
-
-  // Marker styles
-  for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
-    const color = hexToKmlColor(MARKER_COLORS[type as keyof typeof MARKER_COLORS]);
-    lines.push(`<Style id="marker-${type}"><IconStyle><Icon><href>${iconUrl}</href></Icon><scale>1.0</scale><color>${color}</color></IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`);
-  }
-
-  return lines.join('\n');
+/** Build one <Style> block for a specific marker. */
+export function markerStyleXml(id: string, marker: MarkerData): string {
+  const iconUrl = marker.icon ?? MARKER_KML_ICONS[marker.type];
+  const colorTag = !marker.icon
+    ? `<color>${hexToKmlColor(marker.color ?? MARKER_COLORS[marker.type])}</color>`
+    : '';
+  return `<Style id="${id}"><IconStyle><Icon><href>${iconUrl}</href></Icon><scale>1.0</scale>${colorTag}</IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`;
 }
 
 function pointPlacemark(name: string, styleUrl: string, lat: number, lng: number, description?: string): string {
@@ -46,15 +43,18 @@ export function buildKml(opts: KmlBuildOptions): string {
   parts.push('<kml xmlns="http://www.opengis.net/kml/2.2">');
   parts.push('<Document>');
   parts.push('<name>Карта</name>');
-  parts.push(kmlStyles(opts));
+
+  // Per-marker styles
+  for (const m of opts.markers) {
+    parts.push(markerStyleXml(`marker-${m.id}`, m));
+  }
 
   // Markers folder
   if (opts.markers.length > 0) {
     parts.push('<Folder><name>Маркеры</name>');
     for (const m of opts.markers) {
       const name = opts.showPointLabels ? (m.name || '') : '';
-      const desc = [m.description].filter(Boolean).join('; ');
-      parts.push(pointPlacemark(name, `#marker-${m.type}`, m.latlng.lat, m.latlng.lng, desc));
+      parts.push(pointPlacemark(name, `#marker-${m.id}`, m.latlng.lat, m.latlng.lng, m.description));
     }
     parts.push('</Folder>');
   }
