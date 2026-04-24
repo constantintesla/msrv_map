@@ -27,9 +27,11 @@ function buildKmzKml(overlayBounds: Bounds | null): string {
   parts.push('<Document>');
   parts.push('<name>Карта</name>');
 
-  // Per-marker styles — абсолютный URL иконки, чтобы работало во всех вьюверах (Alpinequest и т.п.)
+  // Per-marker styles — абсолютный URL иконки с http:// (некоторые вьюверы типа Alpinequest
+  // распознают иконки только по такой схеме, как у старого Google Maps API).
   for (const m of markers) {
-    const href = m.icon ?? MARKER_KML_ICONS[m.type];
+    const rawHref = m.icon ?? MARKER_KML_ICONS[m.type];
+    const href = rawHref.replace(/^https:\/\/maps\.google\.com\//i, 'http://maps.google.com/');
     const colorTag = !m.icon
       ? `<color>${hexToKmlColor(m.color ?? MARKER_COLORS[m.type])}</color>`
       : '';
