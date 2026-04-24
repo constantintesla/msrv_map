@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import type { MarkerData } from '../types';
 import { MARKER_COLORS, MARKER_TYPE_NAMES } from '../constants';
+import { resolveIconLocal } from '../constants/curated-icons';
 import { state } from './state';
 import { bus } from './events';
 import { getMap } from './map';
@@ -8,8 +9,18 @@ import { updateMarker } from './markers';
 
 const leafletMarkers = new Map<string, L.Marker>();
 
-function createMarkerIcon(type: string, size: number = 12): L.DivIcon {
-  const color = MARKER_COLORS[type as keyof typeof MARKER_COLORS] ?? MARKER_COLORS.default;
+function createMarkerIcon(data: MarkerData): L.Icon | L.DivIcon {
+  if (data.icon) {
+    const url = resolveIconLocal(data.icon) ?? data.icon;
+    return L.icon({
+      iconUrl: url,
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -32],
+    });
+  }
+  const color = data.color ?? MARKER_COLORS[data.type] ?? MARKER_COLORS.default;
+  const size = 12;
   return L.divIcon({
     className: 'map-marker',
     html: `<div style="
@@ -39,7 +50,7 @@ function renderMarker(data: MarkerData): void {
   if (existing) map.removeLayer(existing);
 
   const marker = L.marker([data.latlng.lat, data.latlng.lng], {
-    icon: createMarkerIcon(data.type),
+    icon: createMarkerIcon(data),
     draggable: true,
     zIndexOffset: 2000,
   });
@@ -60,19 +71,6 @@ function renderMarker(data: MarkerData): void {
   marker.on('dragend', () => {
     const pos = marker.getLatLng();
     updateMarker(data.id, { latlng: { lat: pos.lat, lng: pos.lng } });
-  });
-
-  // Ctrl+Click → edit
-  marker.on('click', (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.ctrlKey) {
-      const desc = prompt('Описание:', data.description);
-      if (desc !== null) {
-        const name = prompt('Подпись:', data.name);
-        if (name !== null) {
-          updateMarker(data.id, { description: desc, name });
-        }
-      }
-    }
   });
 
   marker.addTo(map);
