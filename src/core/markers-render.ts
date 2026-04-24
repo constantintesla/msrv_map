@@ -73,6 +73,13 @@ function renderMarker(data: MarkerData): void {
     updateMarker(data.id, { latlng: { lat: pos.lat, lng: pos.lng } });
   });
 
+  // Ctrl+Click → open editor
+  marker.on('click', (e: L.LeafletMouseEvent) => {
+    if (e.originalEvent.ctrlKey) {
+      bus.emit('marker:edit-request', { id: data.id });
+    }
+  });
+
   marker.addTo(map);
   leafletMarkers.set(data.id, marker);
 }

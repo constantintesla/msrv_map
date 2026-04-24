@@ -131,6 +131,7 @@ export interface EventMap {
   'marker:added': { marker: MarkerData };
   'marker:updated': { marker: MarkerData };
   'marker:removed': { id: string };
+  'marker:edit-request': { id: string };
   'markers:cleared': void;
   'zone:selected': { bounds: Bounds };
   'zone:cleared': void;
