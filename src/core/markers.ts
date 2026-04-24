@@ -19,7 +19,10 @@ export function addMarker(latlng: LatLng, type: MarkerType, name: string, descri
 }
 
 /** Update existing marker */
-export function updateMarker(id: string, updates: Partial<Pick<MarkerData, 'name' | 'description' | 'type' | 'latlng'>>): void {
+export function updateMarker(
+  id: string,
+  updates: Partial<Pick<MarkerData, 'name' | 'description' | 'type' | 'latlng' | 'color' | 'icon'>>,
+): void {
   const markers = state.get('markers').map(m =>
     m.id === id ? { ...m, ...updates } : m
   );

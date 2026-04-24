@@ -8,6 +8,8 @@ export interface MarkerData {
   type: MarkerType;
   name: string;
   description: string;
+  color?: string; // #RRGGBB. Переопределяет MARKER_COLORS[type]. Игнорируется визуально если задан icon.
+  icon?: string;  // URL иконки (курируемой из maps.google.com или произвольной).
 }
 
 // === Grid Types ===
