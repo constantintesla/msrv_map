@@ -57,12 +57,13 @@ function renderMarker(data: MarkerData): void {
 
   marker.bindPopup(createPopupContent(data));
 
-  // Tooltip (persistent label)
+  // Tooltip (persistent label). С иконкой (якорь внизу, высота 32) поднимаем выше, чтобы не перекрывалась.
   if (data.name && state.get('showPointLabels')) {
+    const tooltipOffset: [number, number] = data.icon ? [0, -34] : [0, -10];
     marker.bindTooltip(data.name, {
       permanent: true,
       direction: 'top',
-      offset: [0, -10],
+      offset: tooltipOffset,
       className: 'marker-tooltip',
     });
   }
