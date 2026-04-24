@@ -1,11 +1,12 @@
 import JSZip from 'jszip';
-import type { Bounds } from '../types';
+import type { Bounds, MarkerData } from '../types';
 import { state } from '../core/state';
 import { buildKml } from './kml-builder';
 import { renderGridOverlay } from './grid-overlay';
 import { downloadBlob, downloadText } from '../utils/download';
 import { escapeXml, formatKmlCoord } from '../utils/xml';
 import { MARKER_KML_ICONS, MARKER_COLORS } from '../constants';
+import { findCuratedByUrl } from '../constants/curated-icons';
 import { metersToDegreesLat, metersToDegreesLng } from '../utils/geo';
 
 /** Convert hex #RRGGBB to KML AABBGGRR */
@@ -16,8 +17,30 @@ function hexToKmlColor(hex: string): string {
   return `ff${b}${g}${r}`;
 }
 
-/** Build KML for KMZ — markers + GroundOverlay (grid as PNG image) */
-function buildKmzKml(overlayBounds: Bounds): string {
+interface BundledIcon {
+  /** Относительный путь внутри zip. */
+  zipPath: string;
+  /** Откуда брать байты. */
+  sourceUrl: string;
+}
+
+/** Для каждого marker — вернуть href, который будет записан в KML внутри KMZ. */
+function resolveKmzIconHref(m: MarkerData, bundled: Map<string, BundledIcon>): string {
+  const rawUrl = m.icon ?? MARKER_KML_ICONS[m.type];
+  const curated = findCuratedByUrl(rawUrl) ?? findCuratedByUrl(MARKER_KML_ICONS[m.type]);
+  if (curated) {
+    const zipPath = `icons/${curated.id}.png`;
+    if (!bundled.has(zipPath)) {
+      bundled.set(zipPath, { zipPath, sourceUrl: curated.localUrl });
+    }
+    return zipPath;
+  }
+  // Некурируемая (кастомная) — оставляем абсолютный URL, не бандлим.
+  return rawUrl;
+}
+
+/** Build KML for KMZ — per-marker стили + GroundOverlay (grid as PNG image) */
+function buildKmzKml(overlayBounds: Bounds | null, bundled: Map<string, BundledIcon>): string {
   const markers = state.get('markers');
   const showPointLabels = state.get('showPointLabels');
 
@@ -27,10 +50,13 @@ function buildKmzKml(overlayBounds: Bounds): string {
   parts.push('<Document>');
   parts.push('<name>Карта</name>');
 
-  // Marker styles
-  for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
-    const color = hexToKmlColor(MARKER_COLORS[type as keyof typeof MARKER_COLORS]);
-    parts.push(`<Style id="marker-${type}"><IconStyle><Icon><href>${iconUrl}</href></Icon><scale>1.0</scale><color>${color}</color></IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`);
+  // Per-marker styles
+  for (const m of markers) {
+    const href = resolveKmzIconHref(m, bundled);
+    const colorTag = !m.icon
+      ? `<color>${hexToKmlColor(m.color ?? MARKER_COLORS[m.type])}</color>`
+      : '';
+    parts.push(`<Style id="marker-${m.id}"><IconStyle><Icon><href>${escapeXml(href)}</href></Icon><scale>1.0</scale>${colorTag}</IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`);
   }
 
   // Markers
@@ -38,13 +64,14 @@ function buildKmzKml(overlayBounds: Bounds): string {
     parts.push('<Folder><name>Маркеры</name>');
     for (const m of markers) {
       const name = showPointLabels ? (m.name || '') : '';
-      parts.push(`<Placemark><name>${escapeXml(name)}</name>${m.description ? `<description>${escapeXml(m.description)}</description>` : ''}<styleUrl>#marker-${m.type}</styleUrl><Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point></Placemark>`);
+      parts.push(`<Placemark><name>${escapeXml(name)}</name>${m.description ? `<description>${escapeXml(m.description)}</description>` : ''}<styleUrl>#marker-${m.id}</styleUrl><Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point></Placemark>`);
     }
     parts.push('</Folder>');
   }
 
   // Grid as transparent GroundOverlay
-  parts.push(`<GroundOverlay>
+  if (overlayBounds) {
+    parts.push(`<GroundOverlay>
 <name>Сетка</name>
 <Icon><href>grid_overlay.png</href></Icon>
 <LatLonBox>
@@ -54,6 +81,7 @@ function buildKmzKml(overlayBounds: Bounds): string {
   <west>${overlayBounds.west}</west>
 </LatLonBox>
 </GroundOverlay>`);
+  }
 
   parts.push('</Document>');
   parts.push('</kml>');
@@ -76,7 +104,17 @@ function buildStateKml() {
   });
 }
 
-/** Export KMZ file (grid as GroundOverlay PNG + markers) */
+async function fetchAsBlob(url: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
+}
+
+/** Export KMZ file (grid as GroundOverlay PNG + markers с встроенными иконками) */
 export async function exportKmz(): Promise<void> {
   const squares = state.get('gridSquares');
   const gridBounds = state.get('gridBounds');
@@ -87,14 +125,16 @@ export async function exportKmz(): Promise<void> {
   }
 
   const zip = new JSZip();
+  const bundled = new Map<string, BundledIcon>();
 
+  let overlayBounds: Bounds | null = null;
   if (squares.length > 0 && gridBounds) {
     // Expand bounds to fit edge labels outside the grid
     const gridSize = state.get('gridSize');
     const centerLat = (gridBounds.north + gridBounds.south) / 2;
     const padLat = metersToDegreesLat(gridSize * 0.15);
     const padLng = metersToDegreesLng(gridSize * 0.15, centerLat);
-    const overlayBounds: Bounds = {
+    overlayBounds = {
       north: gridBounds.north + padLat,
       south: gridBounds.south - padLat,
       east: gridBounds.east + padLng,
@@ -102,11 +142,15 @@ export async function exportKmz(): Promise<void> {
     };
 
     const overlayBlob = await renderGridOverlay(squares, overlayBounds);
-    zip.file('doc.kml', buildKmzKml(overlayBounds));
     zip.file('grid_overlay.png', overlayBlob);
-  } else {
-    // No grid — just markers as vector KML
-    zip.file('doc.kml', buildStateKml());
+  }
+
+  zip.file('doc.kml', buildKmzKml(overlayBounds, bundled));
+
+  // Встраиваем иконки, которые набрались из resolveKmzIconHref.
+  for (const { zipPath, sourceUrl } of bundled.values()) {
+    const blob = await fetchAsBlob(sourceUrl);
+    if (blob) zip.file(zipPath, blob);
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });
