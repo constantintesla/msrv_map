@@ -34,6 +34,15 @@ describe('kml-parser — icon/color', () => {
     expect(markers[0].icon).toBe('https://example.com/custom.png');
   });
 
+  it('относительный путь из KMZ → icon = remoteUrl курируемой иконки', () => {
+    const kml = wrap(
+      '<Style id="s1"><IconStyle><Icon><href>icons/shape-flag.png</href></Icon></IconStyle></Style>',
+      '<Placemark><name>Marker</name><styleUrl>#s1</styleUrl><Point><coordinates>10,20</coordinates></Point></Placemark>',
+    );
+    const { markers } = parseKmlForTest(kml);
+    expect(markers[0].icon).toBe('https://maps.google.com/mapfiles/kml/shapes/flag.png');
+  });
+
   it('IconStyle color без иконки → color в MarkerData', () => {
     // KML color: AABBGGRR. Для #abcdef → ff ef cd ab
     const kml = wrap(

@@ -1,6 +1,6 @@
 import type { MarkerData, MarkerType, GridSquare } from '../types';
 import { MARKER_COLORS, MARKER_KML_ICONS } from '../constants';
-import { findCuratedByUrl } from '../constants/curated-icons';
+import { findCuratedByUrl, findCuratedByFilename } from '../constants/curated-icons';
 import { parseXml } from '../utils/xml';
 import { unpackKmz } from './kmz';
 import { state } from '../core/state';
@@ -235,7 +235,7 @@ function resolveMarkerInfo(pm: Element, styleUrl: string, styleMap: Map<string, 
   let icon: string | undefined;
   if (normalized && normalized !== defaultForType) {
     // Либо курируемая — запомним remoteUrl, либо произвольная — as is.
-    const curated = findCuratedByUrl(normalized);
+    const curated = findCuratedByUrl(normalized) ?? findCuratedByFilename(normalized);
     icon = curated ? curated.remoteUrl : normalized;
   }
 
