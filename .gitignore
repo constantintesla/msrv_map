@@ -53,3 +53,16 @@ exports/
 
 # Файлы браузера
 *.orig
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+
+.beads/
+.claude/
+.serena/
+docs/
+test-results/
+bash.exe.stackdump
+playwright.config.ts

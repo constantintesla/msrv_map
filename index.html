@@ -1,261 +1,50 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Генератор KMZ файлов</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <!-- Leaflet Draw CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
-    
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Генератор карт</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Генератор KMZ файлов</h1>
-        </header>
-        
-        <div class="main-content">
-            <div class="sidebar">
-                <div class="control-panel">
-                    <h2>Настройки</h2>
-                    
-                    <div class="control-group">
-                        <label for="map-type">Подложка карты:</label>
-                        <select id="map-type">
-                            <option value="satellite">Спутник</option>
-                            <option value="topographic">Топографическая</option>
-                            <option value="elevation">С высотами (OpenTopoMap)</option>
-                        </select>
-                    </div>
-                    
-                    <div class="control-group">
-                        <label for="grid-size">Размер сетки (метры):</label>
-                        <input type="number" id="grid-size" value="100" min="10" max="10000" step="10">
-                    </div>
-                    
-                    <div class="control-group">
-                        <label for="grid-color">Цвет сетки:</label>
-                        <input type="color" id="grid-color" value="#667eea">
-                    </div>
-                    
-                    <div class="control-group">
-                        <label for="grid-weight">Толщина сетки:</label>
-                        <input type="number" id="grid-weight" value="2" min="1" max="10" step="1">
-                    </div>
-                    
-                    <div class="control-group">
-                        <button id="select-zone" class="btn btn-primary">Выбрать зону для сетки</button>
-                        <button id="clear-zone" class="btn btn-secondary" style="display:none;">Очистить зону</button>
-                        <div id="zone-info" class="zone-info" style="display:none; margin-top: 0.5rem; padding: 0.5rem; background: #e8f4f8; border-radius: 4px; font-size: 0.85rem;">
-                            Зона выбрана
-                        </div>
-                    </div>
-                    
-                    <div class="control-group">
-                        <button id="generate-grid" class="btn btn-primary">Создать сетку</button>
-                        <button id="clear-grid" class="btn btn-secondary">Очистить сетку</button>
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Сдвиг сетки</h3>
-                        <label for="grid-shift-step">Шаг сдвига (метры):</label>
-                        <input type="number" id="grid-shift-step" value="10" min="1" max="10000" step="1">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 8px;">
-                            <div></div>
-                            <button id="shift-grid-up" class="btn btn-secondary" style="margin: 0;">Вверх</button>
-                            <div></div>
-                            <button id="shift-grid-left" class="btn btn-secondary" style="margin: 0;">Влево</button>
-                            <button id="shift-grid-center" class="btn btn-secondary" style="margin: 0;">Обновить</button>
-                            <button id="shift-grid-right" class="btn btn-secondary" style="margin: 0;">Вправо</button>
-                            <div></div>
-                            <button id="shift-grid-down" class="btn btn-secondary" style="margin: 0;">Вниз</button>
-                            <div></div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-group">
-                        <div class="info-text">
-                            <small style="color: #666;">Улитка отображается только в квадрате A2 как справочная информация</small>
-                        </div>
-                    </div>
-                    
-                    <div class="control-group">
-                        <label>
-                            <input type="checkbox" id="show-square-names" checked> Показывать названия квадратов
-                        </label>
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Краевые метки</h3>
-                        <label>
-                            <input type="checkbox" id="show-edge-left" checked> Слева (буквы)
-                        </label>
-                        <label>
-                            <input type="checkbox" id="show-edge-right"> Справа (буквы)
-                        </label>
-                        <label>
-                            <input type="checkbox" id="show-edge-top" checked> Сверху (цифры)
-                        </label>
-                        <label>
-                            <input type="checkbox" id="show-edge-bottom" checked> Снизу (цифры)
-                        </label>
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Подписи и шрифт</h3>
-                        <label>
-                            <input type="checkbox" id="show-point-labels" checked> Показывать подписи точек
-                        </label>
-                        <label for="label-font-family">Шрифт:</label>
-                        <select id="label-font-family">
-                            <option value="Arial, sans-serif">Arial</option>
-                            <option value="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif">Segoe UI</option>
-                            <option value="'Roboto', sans-serif">Roboto</option>
-                            <option value="'Times New Roman', serif">Times New Roman</option>
-                        </select>
-                        <label for="square-font-size">Шрифт квадратов (px):</label>
-                        <input type="number" id="square-font-size" value="11" min="8" max="48" step="1">
-                        <label for="square-label-position">Положение названия квадрата:</label>
-                        <select id="square-label-position">
-                            <option value="top-left">Слева сверху</option>
-                            <option value="top-center">Сверху по центру</option>
-                            <option value="top-right">Справа сверху</option>
-                            <option value="center-left">Слева по центру</option>
-                            <option value="center">По центру</option>
-                            <option value="center-right">Справа по центру</option>
-                            <option value="bottom-left">Слева снизу</option>
-                            <option value="bottom-center">Снизу по центру</option>
-                            <option value="bottom-right" selected>Справа снизу</option>
-                        </select>
-                        <label for="edge-font-size">Шрифт краевых меток (px):</label>
-                        <input type="number" id="edge-font-size" value="12" min="8" max="48" step="1">
-                        <label for="point-font-size">Шрифт подписей точек (px):</label>
-                        <input type="number" id="point-font-size" value="12" min="8" max="48" step="1">
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Добавить метку</h3>
-                        <label for="marker-type">Тип метки:</label>
-                        <select id="marker-type">
-                            <option value="default">Стандартная</option>
-                            <option value="warning">Предупреждение</option>
-                            <option value="danger">Опасность</option>
-                            <option value="info">Информация</option>
-                            <option value="checkpoint">КПП</option>
-                        </select>
-                        
-                        <label for="marker-description">Описание:</label>
-                        <textarea id="marker-description" rows="3" placeholder="Введите описание метки"></textarea>
-                        <label for="marker-name">Подпись точки:</label>
-                        <input type="text" id="marker-name" placeholder="Например: Точка 1">
-                        
-                        <button id="add-marker-btn" class="btn btn-primary">Режим добавления меток</button>
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Метки</h3>
-                        <div id="markers-list"></div>
-                    </div>
-                    
-                    <div class="control-group">
-                        <h3>Проекты</h3>
-                        <label for="project-name">Название проекта:</label>
-                        <input type="text" id="project-name" placeholder="Введите название проекта">
-                        <button id="save-project" class="btn btn-success" style="margin-top: 5px;">Сохранить проект</button>
-                        
-                        <div style="margin-top: 15px;">
-                            <h4 style="font-size: 0.95rem; margin-bottom: 10px;">Сохраненные проекты:</h4>
-                            <div id="projects-list" style="max-height: 200px; overflow-y: auto;">
-                                <div class="empty-state">Проекты не сохранены</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-group">
-                        <button id="print-preview" class="btn btn-primary">Предпросмотр печати</button>
-                        <div style="margin-top: 10px;">
-                            <button id="export-kml-kmz" class="btn btn-success">Экспортировать KML + KMZ</button>
-                            <button id="export-hires-png" class="btn btn-success" style="margin-top: 5px;">Экспортировать PNG (сетка и точки)</button>
-                        </div>
-                        <div style="margin-top: 10px;">
-                            <label for="import-kmz" class="btn btn-info" style="display: inline-block; cursor: pointer; margin: 0;">
-                                Импортировать KMZ/KML
-                            </label>
-                            <input type="file" id="import-kmz" accept=".kmz,.kml" style="display: none;">
-                        </div>
-                        <button id="clear-all" class="btn btn-danger">Очистить всё</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="map-container">
-                <div id="map"></div>
-            </div>
+  <div id="app">
+    <header class="header">
+      <h1 class="header__title">Генератор карт</h1>
+      <nav class="header__nav">
+        <a href="/" class="header__link header__link--active">Карта</a>
+        <a href="/converter.html" class="header__link">Конвертер</a>
+        <button type="button" class="header__help" id="btn-header-help" aria-label="Справка" title="Как пользоваться">?</button>
+      </nav>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="tabs">
+          <button class="tabs__btn tabs__btn--active" data-tab="map">🗺️</button>
+          <button class="tabs__btn" data-tab="grid">📐</button>
+          <button class="tabs__btn" data-tab="markers">📍</button>
+          <button class="tabs__btn" data-tab="file">💾</button>
         </div>
-    </div>
-    
-    <!-- Модальное окно предпросмотра печати -->
-    <div id="print-preview-modal" class="print-modal" style="display: none;">
-        <div class="print-modal-content">
-            <div class="print-modal-header">
-                <h2>Предпросмотр печати</h2>
-                <button class="print-modal-close" id="close-print-preview">&times;</button>
-            </div>
-            <div class="print-modal-body">
-                <div class="print-options">
-                    <label for="paper-size">Формат бумаги:</label>
-                    <select id="paper-size">
-                        <option value="A4">A4 (210 × 297 мм)</option>
-                        <option value="A3">A3 (297 × 420 мм)</option>
-                    </select>
-                    <label for="orientation">Ориентация:</label>
-                    <select id="orientation">
-                        <option value="portrait">Книжная</option>
-                        <option value="landscape">Альбомная</option>
-                    </select>
-                    <label for="preview-zoom">Масштаб:</label>
-                    <input type="range" id="preview-zoom" min="1" max="19" step="0.1" value="13" style="flex: 1;">
-                    <span id="preview-zoom-value" style="min-width: 40px; text-align: right; font-size: 0.85rem; color: #555;">13</span>
-                    <label for="export-zone-mode">Зона экспорта:</label>
-                    <select id="export-zone-mode">
-                        <option value="grid">По сетке</option>
-                        <option value="selected-zone">Выбранная зона</option>
-                        <option value="current-view">Текущий экран</option>
-                    </select>
-                </div>
-                <div id="print-preview-container" class="print-preview-container">
-                    <!-- Сюда будет вставлен предпросмотр -->
-                </div>
-                <div class="print-actions">
-                    <button id="print-btn" class="btn btn-primary">Печать</button>
-                    <button id="export-png-btn" class="btn btn-success">Экспорт PNG (сетка и точки)</button>
-                    <button id="cancel-print-btn" class="btn btn-secondary">Отмена</button>
-                </div>
-            </div>
+
+        <div class="sidebar__content">
+          <div class="tab-panel tab-panel--active" data-panel="map" id="tab-map"></div>
+          <div class="tab-panel" data-panel="grid" id="tab-grid"></div>
+          <div class="tab-panel" data-panel="markers" id="tab-markers"></div>
+          <div class="tab-panel" data-panel="file" id="tab-file"></div>
         </div>
+
+        <div class="export-panel" id="export-panel"></div>
+      </aside>
+
+      <main class="map-wrapper">
+        <div id="map" class="map"></div>
+        <div id="mode-indicator" class="mode-indicator" style="display:none;"></div>
+      </main>
     </div>
-    
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <!-- Leaflet Draw JS -->
-    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-    
-    <!-- JSZip for KMZ creation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    
-    <!-- html2canvas for high-quality print export -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
-    <!-- jsPDF for PDF export -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    
-    <script src="app.js?v=84"></script>
+  </div>
+
+  <div id="modal-overlay" class="modal-overlay" style="display:none;"></div>
+
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
-
