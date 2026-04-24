@@ -29,7 +29,7 @@ export function markerStyleXml(id: string, marker: MarkerData): string {
   const colorTag = !marker.icon
     ? `<color>${hexToKmlColor(marker.color ?? MARKER_COLORS[marker.type])}</color>`
     : '';
-  return `<Style id="${id}"><IconStyle><Icon><href>${iconUrl}</href></Icon><scale>1.0</scale>${colorTag}</IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`;
+  return `<Style id="${id}"><IconStyle><Icon><href>${escapeXml(iconUrl)}</href></Icon><scale>1.0</scale>${colorTag}</IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`;
 }
 
 function pointPlacemark(name: string, styleUrl: string, lat: number, lng: number, description?: string): string {
