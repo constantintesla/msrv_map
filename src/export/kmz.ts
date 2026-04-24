@@ -27,23 +27,30 @@ function buildKmzKml(overlayBounds: Bounds | null): string {
   parts.push('<Document>');
   parts.push('<name>Карта</name>');
 
-  // Per-marker styles — абсолютный URL иконки с http:// (некоторые вьюверы типа Alpinequest
-  // распознают иконки только по такой схеме, как у старого Google Maps API).
-  for (const m of markers) {
-    const rawHref = m.icon ?? MARKER_KML_ICONS[m.type];
-    const href = rawHref.replace(/^https:\/\/maps\.google\.com\//i, 'http://maps.google.com/');
-    const colorTag = !m.icon
-      ? `<color>${hexToKmlColor(m.color ?? MARKER_COLORS[m.type])}</color>`
-      : '';
-    parts.push(`<Style id="marker-${m.id}"><IconStyle><Icon><href>${escapeXml(href)}</href></Icon><scale>1.0</scale>${colorTag}</IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`);
-  }
-
-  // Markers
+  // Markers с inline <Style> внутри Placemark — формат, совместимый с Alpinequest и др.
+  // (как в ISAF_2026: http://maps.google.com URL + inline style + <scale> + <color>).
   if (markers.length > 0) {
     parts.push('<Folder><name>Маркеры</name>');
     for (const m of markers) {
       const name = showPointLabels ? (m.name || '') : '';
-      parts.push(`<Placemark><name>${escapeXml(name)}</name>${m.description ? `<description>${escapeXml(m.description)}</description>` : ''}<styleUrl>#marker-${m.id}</styleUrl><Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point></Placemark>`);
+      const rawHref = m.icon ?? MARKER_KML_ICONS[m.type];
+      const href = rawHref.replace(/^https:\/\/maps\.google\.com\//i, 'http://maps.google.com/');
+      const color = hexToKmlColor(m.color ?? MARKER_COLORS[m.type]);
+      parts.push(
+        `<Placemark>` +
+        `<name>${escapeXml(name)}</name>` +
+        (m.description ? `<description>${escapeXml(m.description)}</description>` : '') +
+        `<Style>` +
+          `<IconStyle>` +
+            `<scale>1.0</scale>` +
+            `<color>${color}</color>` +
+            `<Icon><href>${escapeXml(href)}</href></Icon>` +
+          `</IconStyle>` +
+          `<LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle>` +
+        `</Style>` +
+        `<Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point>` +
+        `</Placemark>`,
+      );
     }
     parts.push('</Folder>');
   }
