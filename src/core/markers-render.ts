@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import type { MarkerData } from '../types';
 import { MARKER_COLORS, MARKER_TYPE_NAMES } from '../constants';
+import { resolveIconLocal } from '../constants/curated-icons';
 import { state } from './state';
 import { bus } from './events';
 import { getMap } from './map';
@@ -8,8 +9,18 @@ import { updateMarker } from './markers';
 
 const leafletMarkers = new Map<string, L.Marker>();
 
-function createMarkerIcon(type: string, size: number = 12): L.DivIcon {
-  const color = MARKER_COLORS[type as keyof typeof MARKER_COLORS] ?? MARKER_COLORS.default;
+function createMarkerIcon(data: MarkerData): L.Icon | L.DivIcon {
+  if (data.icon) {
+    const url = resolveIconLocal(data.icon) ?? data.icon;
+    return L.icon({
+      iconUrl: url,
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -32],
+    });
+  }
+  const color = data.color ?? MARKER_COLORS[data.type] ?? MARKER_COLORS.default;
+  const size = 12;
   return L.divIcon({
     className: 'map-marker',
     html: `<div style="
@@ -39,19 +50,20 @@ function renderMarker(data: MarkerData): void {
   if (existing) map.removeLayer(existing);
 
   const marker = L.marker([data.latlng.lat, data.latlng.lng], {
-    icon: createMarkerIcon(data.type),
+    icon: createMarkerIcon(data),
     draggable: true,
     zIndexOffset: 2000,
   });
 
   marker.bindPopup(createPopupContent(data));
 
-  // Tooltip (persistent label)
+  // Tooltip (persistent label). С иконкой (якорь внизу, высота 32) поднимаем выше, чтобы не перекрывалась.
   if (data.name && state.get('showPointLabels')) {
+    const tooltipOffset: [number, number] = data.icon ? [0, -34] : [0, -10];
     marker.bindTooltip(data.name, {
       permanent: true,
       direction: 'top',
-      offset: [0, -10],
+      offset: tooltipOffset,
       className: 'marker-tooltip',
     });
   }
@@ -62,16 +74,10 @@ function renderMarker(data: MarkerData): void {
     updateMarker(data.id, { latlng: { lat: pos.lat, lng: pos.lng } });
   });
 
-  // Ctrl+Click → edit
+  // Ctrl+Click → open editor
   marker.on('click', (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.ctrlKey) {
-      const desc = prompt('Описание:', data.description);
-      if (desc !== null) {
-        const name = prompt('Подпись:', data.name);
-        if (name !== null) {
-          updateMarker(data.id, { description: desc, name });
-        }
-      }
+    if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
+      bus.emit('marker:edit-request', { id: data.id });
     }
   });
 

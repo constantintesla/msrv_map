@@ -1,5 +1,6 @@
 import type { MarkerData, MarkerType, GridSquare } from '../types';
 import { MARKER_COLORS, MARKER_KML_ICONS } from '../constants';
+import { findCuratedByUrl, findCuratedByFilename } from '../constants/curated-icons';
 import { parseXml } from '../utils/xml';
 import { unpackKmz } from './kmz';
 import { state } from '../core/state';
@@ -10,6 +11,18 @@ interface ParseResult {
   markers: MarkerData[];
   squares: GridSquare[];
   gridSize: number | null;
+}
+
+interface StyleInfo {
+  type: MarkerType;
+  iconHref: string | null;  // сырой href, как в KML
+  kmlColor: string | null;  // AABBGGRR, как в KML
+}
+
+interface MarkerInfo {
+  type: MarkerType;
+  icon?: string;
+  color?: string;
 }
 
 const GRID_NAME_PATTERN = /^[A-ZА-Я]{1,2}\d+$/;
@@ -104,14 +117,16 @@ function parseKml(content: string): ParseResult {
     const [lng, lat] = coords.split(',').map(Number);
     if (isNaN(lat) || isNaN(lng)) continue;
 
-    const type = resolveMarkerType(pm, styleUrl, styleTypeMap);
+    const resolved = resolveMarkerInfo(pm, styleUrl, styleTypeMap);
 
     markers.push({
       id: crypto.randomUUID(),
       latlng: { lat, lng },
-      type,
+      type: resolved.type,
       name,
       description: pm.querySelector('description')?.textContent?.trim() ?? '',
+      icon: resolved.icon,
+      color: resolved.color,
     });
   }
 
@@ -153,50 +168,91 @@ function isGridLabelStyle(styleUrl: string): boolean {
   return styleUrl === '#squareLabelStyle' || styleUrl === '#edgeLabelStyle';
 }
 
-function buildStyleTypeMap(doc: Document): Map<string, MarkerType> {
-  const map = new Map<string, MarkerType>();
+function buildStyleTypeMap(doc: Document): Map<string, StyleInfo> {
+  const map = new Map<string, StyleInfo>();
 
   doc.querySelectorAll('Style').forEach(style => {
     const id = style.getAttribute('id') ?? '';
     const href = style.querySelector('IconStyle Icon href')?.textContent ?? '';
-    const color = style.querySelector('IconStyle color')?.textContent ?? '';
+    const kmlColor = style.querySelector('IconStyle color')?.textContent ?? null;
 
-    // Match by icon URL
-    for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
-      if (href.includes(iconUrl) || href.includes(type)) {
-        map.set(`#${id}`, type as MarkerType);
-        return;
+    let type: MarkerType | null = null;
+
+    for (const [t, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
+      if (href.includes(iconUrl) || href.includes(t)) {
+        type = t as MarkerType;
+        break;
       }
     }
 
-    // Match by color
-    if (color) {
-      const resolved = inferTypeByKmlColor(color);
-      if (resolved) map.set(`#${id}`, resolved);
+    if (!type && kmlColor) {
+      type = inferTypeByKmlColor(kmlColor);
     }
+
+    map.set(`#${id}`, {
+      type: type ?? 'default',
+      iconHref: href || null,
+      kmlColor,
+    });
   });
 
   return map;
 }
 
-function resolveMarkerType(pm: Element, styleUrl: string, styleMap: Map<string, MarkerType>): MarkerType {
-  // 1. By style URL
-  if (styleUrl && styleMap.has(styleUrl)) return styleMap.get(styleUrl)!;
-
-  // 2. By inline icon
-  const href = pm.querySelector('Style IconStyle Icon href')?.textContent ?? '';
-  for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
-    if (href.includes(iconUrl)) return type as MarkerType;
+function resolveMarkerInfo(pm: Element, styleUrl: string, styleMap: Map<string, StyleInfo>): MarkerInfo {
+  // Собираем href/color из styleUrl, либо inline.
+  let info: StyleInfo = { type: 'default', iconHref: null, kmlColor: null };
+  if (styleUrl && styleMap.has(styleUrl)) {
+    info = styleMap.get(styleUrl)!;
+  } else {
+    const inlineHref = pm.querySelector('Style IconStyle Icon href')?.textContent ?? '';
+    const inlineColor = pm.querySelector('Style IconStyle color')?.textContent ?? null;
+    if (inlineHref || inlineColor) {
+      info = { type: 'default', iconHref: inlineHref || null, kmlColor: inlineColor };
+      for (const [t, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
+        if (inlineHref.includes(iconUrl) || inlineHref.includes(t)) {
+          info.type = t as MarkerType;
+          break;
+        }
+      }
+      if (!info.iconHref && info.kmlColor) {
+        info.type = inferTypeByKmlColor(info.kmlColor) ?? info.type;
+      }
+    } else {
+      // По имени (существующая логика).
+      const name = (pm.querySelector('name')?.textContent ?? '').toLowerCase();
+      if (name.includes('опасн') || name.includes('danger')) info.type = 'danger';
+      else if (name.includes('предупр') || name.includes('warn')) info.type = 'warning';
+      else if (name.includes('кпп') || name.includes('checkpoint')) info.type = 'checkpoint';
+      else if (name.includes('инфо') || name.includes('info')) info.type = 'info';
+    }
   }
 
-  // 3. By name text
-  const name = (pm.querySelector('name')?.textContent ?? '').toLowerCase();
-  if (name.includes('опасн') || name.includes('danger')) return 'danger';
-  if (name.includes('предупр') || name.includes('warn')) return 'warning';
-  if (name.includes('кпп') || name.includes('checkpoint')) return 'checkpoint';
-  if (name.includes('инфо') || name.includes('info')) return 'info';
+  const href = info.iconHref ?? '';
+  const normalized = href.replace(/^http:\/\//i, 'https://').split('?')[0];
+  const defaultForType = MARKER_KML_ICONS[info.type];
 
-  return 'default';
+  let icon: string | undefined;
+  if (normalized && normalized !== defaultForType) {
+    // Либо курируемая — запомним remoteUrl, либо произвольная — as is.
+    const curated = findCuratedByUrl(normalized) ?? findCuratedByFilename(normalized);
+    icon = curated ? curated.remoteUrl : normalized;
+  }
+
+  let color: string | undefined;
+  if (!icon && info.kmlColor) {
+    color = kmlColorToHex(info.kmlColor) ?? undefined;
+  }
+
+  return { type: info.type, icon, color };
+}
+
+function kmlColorToHex(kmlColor: string): string | null {
+  if (kmlColor.length !== 8) return null;
+  const r = kmlColor.slice(6, 8);
+  const g = kmlColor.slice(4, 6);
+  const b = kmlColor.slice(2, 4);
+  return `#${r}${g}${b}`.toLowerCase();
 }
 
 function inferTypeByKmlColor(kmlColor: string): MarkerType | null {
@@ -210,4 +266,9 @@ function inferTypeByKmlColor(kmlColor: string): MarkerType | null {
     if (color.toUpperCase() === hex) return type as MarkerType;
   }
   return null;
+}
+
+// Экспорт для тестов (чтобы не инициализировать state).
+export function parseKmlForTest(content: string): ParseResult {
+  return parseKml(content);
 }

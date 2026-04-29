@@ -16,8 +16,8 @@ function hexToKmlColor(hex: string): string {
   return `ff${b}${g}${r}`;
 }
 
-/** Build KML for KMZ — markers + GroundOverlay (grid as PNG image) */
-function buildKmzKml(overlayBounds: Bounds): string {
+/** Build KML for KMZ — per-marker стили с абсолютными URL иконок + GroundOverlay (grid as PNG image) */
+function buildKmzKml(overlayBounds: Bounds | null): string {
   const markers = state.get('markers');
   const showPointLabels = state.get('showPointLabels');
 
@@ -27,24 +27,37 @@ function buildKmzKml(overlayBounds: Bounds): string {
   parts.push('<Document>');
   parts.push('<name>Карта</name>');
 
-  // Marker styles
-  for (const [type, iconUrl] of Object.entries(MARKER_KML_ICONS)) {
-    const color = hexToKmlColor(MARKER_COLORS[type as keyof typeof MARKER_COLORS]);
-    parts.push(`<Style id="marker-${type}"><IconStyle><Icon><href>${iconUrl}</href></Icon><scale>1.0</scale><color>${color}</color></IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style>`);
-  }
-
-  // Markers
+  // Markers с inline <Style> внутри Placemark — формат, совместимый с Alpinequest и др.
+  // (как в ISAF_2026: http://maps.google.com URL + inline style + <scale> + <color>).
   if (markers.length > 0) {
     parts.push('<Folder><name>Маркеры</name>');
     for (const m of markers) {
       const name = showPointLabels ? (m.name || '') : '';
-      parts.push(`<Placemark><name>${escapeXml(name)}</name>${m.description ? `<description>${escapeXml(m.description)}</description>` : ''}<styleUrl>#marker-${m.type}</styleUrl><Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point></Placemark>`);
+      const rawHref = m.icon ?? MARKER_KML_ICONS[m.type];
+      const href = rawHref.replace(/^https:\/\/maps\.google\.com\//i, 'http://maps.google.com/');
+      const color = hexToKmlColor(m.color ?? MARKER_COLORS[m.type]);
+      parts.push(
+        `<Placemark>` +
+        `<name>${escapeXml(name)}</name>` +
+        (m.description ? `<description>${escapeXml(m.description)}</description>` : '') +
+        `<Style>` +
+          `<IconStyle>` +
+            `<scale>1.0</scale>` +
+            `<color>${color}</color>` +
+            `<Icon><href>${escapeXml(href)}</href></Icon>` +
+          `</IconStyle>` +
+          `<LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle>` +
+        `</Style>` +
+        `<Point><coordinates>${formatKmlCoord(m.latlng.lat, m.latlng.lng)}</coordinates></Point>` +
+        `</Placemark>`,
+      );
     }
     parts.push('</Folder>');
   }
 
   // Grid as transparent GroundOverlay
-  parts.push(`<GroundOverlay>
+  if (overlayBounds) {
+    parts.push(`<GroundOverlay>
 <name>Сетка</name>
 <Icon><href>grid_overlay.png</href></Icon>
 <LatLonBox>
@@ -54,6 +67,7 @@ function buildKmzKml(overlayBounds: Bounds): string {
   <west>${overlayBounds.west}</west>
 </LatLonBox>
 </GroundOverlay>`);
+  }
 
   parts.push('</Document>');
   parts.push('</kml>');
@@ -88,13 +102,14 @@ export async function exportKmz(): Promise<void> {
 
   const zip = new JSZip();
 
+  let overlayBounds: Bounds | null = null;
   if (squares.length > 0 && gridBounds) {
     // Expand bounds to fit edge labels outside the grid
     const gridSize = state.get('gridSize');
     const centerLat = (gridBounds.north + gridBounds.south) / 2;
     const padLat = metersToDegreesLat(gridSize * 0.15);
     const padLng = metersToDegreesLng(gridSize * 0.15, centerLat);
-    const overlayBounds: Bounds = {
+    overlayBounds = {
       north: gridBounds.north + padLat,
       south: gridBounds.south - padLat,
       east: gridBounds.east + padLng,
@@ -102,12 +117,10 @@ export async function exportKmz(): Promise<void> {
     };
 
     const overlayBlob = await renderGridOverlay(squares, overlayBounds);
-    zip.file('doc.kml', buildKmzKml(overlayBounds));
     zip.file('grid_overlay.png', overlayBlob);
-  } else {
-    // No grid — just markers as vector KML
-    zip.file('doc.kml', buildStateKml());
   }
+
+  zip.file('doc.kml', buildKmzKml(overlayBounds));
 
   const blob = await zip.generateAsync({ type: 'blob' });
   downloadBlob(blob, 'map.kmz');
